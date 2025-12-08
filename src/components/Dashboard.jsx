@@ -27,6 +27,11 @@ function Dashboard() {
   const [isLoadingGames, setIsLoadingGames] = useState(true)
   const [nextGameId, setNextGameId] = useState(1)
   const gamesScrollRef = useRef(null)
+  const mobileScrollRef = useRef(null)
+  const touchStartX = useRef(0)
+  const touchStartY = useRef(0)
+  const [currentGameIndex, setCurrentGameIndex] = useState(0)
+  const isScrolling = useRef(false)
 
   // Get user ID for storage
   const userId = user?.sub || user?.email || 'demo-user'
@@ -43,10 +48,13 @@ function Dashboard() {
           // Set nextGameId to be higher than the highest existing ID
           const maxId = Math.max(...games.map(g => g.id || 0))
           setNextGameId(maxId + 1)
+          // Reset mobile index when games are loaded
+          setCurrentGameIndex(0)
         } else {
           // Empty library - no default games
           setRecentGames([])
           setNextGameId(1)
+          setCurrentGameIndex(0)
         }
       } catch (error) {
         console.error('Error loading games:', error)
@@ -115,6 +123,9 @@ function Dashboard() {
       setRecentGames(prevGames => [newGame, ...prevGames])
       setNextGameId(prevId => prevId + 1)
       setIsAddGameModalOpen(false)
+
+      // Reset mobile scroll index to show the new game
+      setCurrentGameIndex(0)
 
       // Scroll to beginning to show the newly added game
       // Use setTimeout to ensure DOM has updated
@@ -206,12 +217,12 @@ function Dashboard() {
       </nav>
 
       {/* Dashboard Content */}
-      <div className="container mx-auto px-6 py-12">
+      <div className="container mx-auto px-6 py-6 md:py-12">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-4xl font-bold text-white mb-2">
+          <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
             Welcome back, {user?.name?.split(' ')[0] || 'Gamer'}! 🎮
           </h1>
-          <p className="text-gray-400 mb-8" id="games-description">
+          <p className="text-gray-400 mb-4 md:mb-8 text-sm md:text-base" id="games-description">
             Here are your recently added games
           </p>
 
@@ -224,39 +235,140 @@ function Dashboard() {
               </div>
             </div>
           ) : (
-            <div className="relative flex gap-6" role="list" aria-labelledby="games-description">
-              {/* Add Game Card - Fixed on Left, Outside Scroll Container */}
-              <div className="flex-shrink-0">
-                <AddGameCard onClick={handleAddGame} />
+            <>
+              {/* Mobile: Add Game Link on Top */}
+              <div className="mb-4 md:hidden">
+                <button
+                  onClick={handleAddGame}
+                  className="w-full text-center px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-medium rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl"
+                  aria-label="Add a new game to your library"
+                >
+                  Click to add game in your library
+                </button>
               </div>
 
-              {/* Game Cards - Horizontal Scroll Container */}
+              {/* Desktop: Add Game Card on Left */}
+              <div className="hidden md:flex gap-6 items-start" role="list" aria-labelledby="games-description">
+                <div className="flex-shrink-0">
+                  <AddGameCard onClick={handleAddGame} />
+                </div>
+
+                {/* Game Cards - Horizontal Scroll Container */}
+                {recentGames.length > 0 ? (
+                  <div 
+                    ref={gamesScrollRef}
+                    className="flex gap-6 overflow-x-auto pb-4 flex-1 min-w-0" 
+                    style={{ 
+                      scrollbarWidth: 'thin',
+                      scrollbarColor: '#4b5563 #1f2937'
+                    }}
+                  >
+                    {recentGames.map((game) => (
+                      <GameCard key={game.id} game={game} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center py-12">
+                    <div className="text-center">
+                      <p className="text-gray-400 text-lg">
+                        You don't have any games in your library yet
+                      </p>
+                      <p className="text-gray-500 text-sm mt-2">
+                        Click the card on the left to add your first game!
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Mobile: Full Screen Game Cards with Swipe */}
               {recentGames.length > 0 ? (
                 <div 
-                  ref={gamesScrollRef}
-                  className="flex gap-6 overflow-x-auto pb-4 flex-1" 
+                  ref={mobileScrollRef}
+                  className="md:hidden relative overflow-hidden pb-4 hide-scrollbar"
                   style={{ 
-                    scrollbarWidth: 'thin',
-                    scrollbarColor: '#4b5563 #1f2937'
+                    height: 'calc(100vh - 240px)', // Account for nav (~64px) + h1/p (~100px) + button (~60px) + padding (~16px)
+                    touchAction: 'pan-y pinch-zoom' // Disable horizontal pan, allow vertical
+                  }}
+                  onTouchStart={(e) => {
+                    if (isScrolling.current) return
+                    touchStartX.current = e.touches[0].clientX
+                    touchStartY.current = e.touches[0].clientY
+                  }}
+                  onTouchMove={(e) => {
+                    if (isScrolling.current) return
+                    const touchX = e.touches[0].clientX
+                    const touchY = e.touches[0].clientY
+                    const deltaX = touchX - touchStartX.current
+                    const deltaY = touchY - touchStartY.current
+                    
+                    // Only handle horizontal swipes (ignore vertical scrolling)
+                    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
+                      e.preventDefault()
+                    }
+                  }}
+                  onTouchEnd={(e) => {
+                    if (isScrolling.current) return
+                    const touchEndX = e.changedTouches[0].clientX
+                    const touchEndY = e.changedTouches[0].clientY
+                    const deltaX = touchEndX - touchStartX.current
+                    const deltaY = touchEndY - touchStartY.current
+                    
+                    // Only handle horizontal swipes (minimum 50px swipe distance)
+                    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
+                      isScrolling.current = true
+                      
+                      setCurrentGameIndex((prevIndex) => {
+                        let newIndex = prevIndex
+                        // Swipe left (negative deltaX) = show next game (increase index)
+                        // Swipe right (positive deltaX) = show previous game (decrease index)
+                        if (deltaX < 0 && prevIndex < recentGames.length - 1) {
+                          // Swipe left - go to next game
+                          newIndex = prevIndex + 1
+                        } else if (deltaX > 0 && prevIndex > 0) {
+                          // Swipe right - go to previous game
+                          newIndex = prevIndex - 1
+                        }
+                        return newIndex
+                      })
+                      
+                      // Reset scrolling flag after animation
+                      setTimeout(() => {
+                        isScrolling.current = false
+                      }, 300)
+                    }
                   }}
                 >
-                  {recentGames.map((game) => (
-                    <GameCard key={game.id} game={game} />
-                  ))}
+                  <div 
+                    className="flex h-full transition-transform duration-300 ease-out"
+                    style={{
+                      transform: `translateX(${-currentGameIndex * 100}%)`,
+                      width: `100%`
+                    }}
+                  >
+                    {recentGames.map((game) => (
+                      <div 
+                        key={game.id} 
+                        className="flex-shrink-0 w-full h-full flex items-center justify-center self-center"
+                      >
+                        <GameCard game={game} />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : (
-                <div className="flex-1 flex items-center justify-center py-12">
+                <div className="md:hidden flex items-center justify-center py-12">
                   <div className="text-center">
                     <p className="text-gray-400 text-lg">
                       You don't have any games in your library yet
                     </p>
                     <p className="text-gray-500 text-sm mt-2">
-                      Click the card on the left to add your first game!
+                      Click the button above to add your first game!
                     </p>
                   </div>
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
       </div>
