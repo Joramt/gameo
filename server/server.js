@@ -16,15 +16,18 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests) in development
-    if (!origin && process.env.NODE_ENV === 'development') {
+    // Allow requests with no origin (like mobile apps, curl, or server-to-server)
+    if (!origin) {
       return callback(null, true)
     }
     
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
       callback(null, true)
     } else {
-      callback(new Error('Not allowed by CORS'))
+      // Log the blocked origin for debugging
+      console.warn(`CORS blocked origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`)
+      callback(new Error(`Not allowed by CORS. Origin: ${origin}`))
     }
   },
   credentials: true,

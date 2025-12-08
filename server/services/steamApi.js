@@ -17,18 +17,32 @@ export async function searchGames(searchTerm) {
 
   const searchUrl = `${STEAM_BASE_URL}/storesearch/?term=${encodeURIComponent(searchTerm)}&cc=US&l=en&count=50`
   
+  // Create AbortController for timeout
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+
   try {
     const response = await fetch(searchUrl, {
       headers: {
-        'User-Agent': 'Gameo/1.0 (Steam API Client)'
-      }
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      signal: controller.signal,
     })
 
+    clearTimeout(timeoutId)
+
     if (!response.ok) {
-      throw new Error(`Steam API returned ${response.status}: ${response.statusText}`)
+      const errorText = await response.text().catch(() => 'Unknown error')
+      throw new Error(`Steam API returned ${response.status}: ${response.statusText}. ${errorText.substring(0, 200)}`)
     }
 
     const data = await response.json()
+    
+    if (!data || typeof data !== 'object') {
+      throw new Error('Invalid response format from Steam API')
+    }
     
     return {
       total: data.total || 0,
@@ -36,7 +50,19 @@ export async function searchGames(searchTerm) {
       timestamp: new Date().toISOString()
     }
   } catch (error) {
+    clearTimeout(timeoutId)
+    
+    if (error.name === 'AbortError') {
+      throw new Error('Request timeout: Steam API took too long to respond')
+    }
+    
     console.error('Steam search API error:', error)
+    console.error('Search URL:', searchUrl)
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    })
     throw new Error(`Failed to search Steam: ${error.message}`)
   }
 }

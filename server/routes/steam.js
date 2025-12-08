@@ -55,9 +55,18 @@ router.get('/search', async (req, res) => {
     })
   } catch (error) {
     console.error('Steam search error:', error)
+    console.error('Error stack:', error.stack)
+    console.error('Request query:', req.query)
+    
+    // Return more detailed error in development, generic in production
+    const errorMessage = process.env.NODE_ENV === 'development' 
+      ? error.message 
+      : 'Failed to search Steam games. Please try again later.'
+    
     res.status(500).json({ 
       error: 'Failed to search Steam games',
-      message: error.message 
+      message: errorMessage,
+      ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
     })
   }
 })

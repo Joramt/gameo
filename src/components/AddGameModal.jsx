@@ -42,10 +42,16 @@ function AddGameModal({ isOpen, onClose, onAddGame, library = [] }) {
         
         try {
           // Try backend search endpoint
-          const searchResponse = await fetch(searchEndpoint)
+          const searchResponse = await fetch(searchEndpoint, {
+            headers: {
+              'Accept': 'application/json',
+            }
+          })
           
           if (!searchResponse.ok) {
-            throw new Error(`Backend search returned ${searchResponse.status}`)
+            const errorText = await searchResponse.text().catch(() => 'Unknown error')
+            console.error(`Backend search error (${searchResponse.status}):`, errorText)
+            throw new Error(`Backend search returned ${searchResponse.status}: ${errorText.substring(0, 100)}`)
           }
           
           const searchData = await searchResponse.json()
