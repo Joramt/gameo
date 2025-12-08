@@ -1,6 +1,6 @@
 import { useAuth0 } from '@auth0/auth0-react'
 import { useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import GameCard from './GameCard'
 import AddGameCard from './AddGameCard'
 import AddGameModal from './AddGameModal'
@@ -26,6 +26,7 @@ function Dashboard() {
   const [isAddGameModalOpen, setIsAddGameModalOpen] = useState(false)
   const [isLoadingGames, setIsLoadingGames] = useState(true)
   const [nextGameId, setNextGameId] = useState(1)
+  const gamesScrollRef = useRef(null)
 
   // Get user ID for storage
   const userId = user?.sub || user?.email || 'demo-user'
@@ -43,63 +44,9 @@ function Dashboard() {
           const maxId = Math.max(...games.map(g => g.id || 0))
           setNextGameId(maxId + 1)
         } else {
-          // Initialize with default games if storage is empty (first time user)
-          const defaultGames = [
-            {
-              id: 1,
-              name: 'Baldur\'s Gate 3',
-              image: 'https://cdn.akamai.steamstatic.com/steam/apps/1086940/library_600x900.jpg',
-              releaseDate: 'Aug 2023',
-              studio: 'Larian Studios',
-              steamAppId: '1086940',
-            },
-            {
-              id: 2,
-              name: 'Alan Wake 2',
-              image: 'https://image.api.playstation.com/vulcan/ap/rnd/202305/2420/fbd0dcc88b31805fc7d49f59b8e0e5d0276403cde7fb8cc8.jpg',
-              releaseDate: 'Oct 2023',
-              studio: 'Remedy Entertainment',
-              steamAppId: null,
-            },
-            {
-              id: 3,
-              name: 'Final Fantasy XVI',
-              image: 'https://upload.wikimedia.org/wikipedia/en/thumb/0/00/Final_Fantasy_XVI_cover_art.png/400px-Final_Fantasy_XVI_cover_art.png',
-              releaseDate: 'Jun 2023',
-              studio: 'Square Enix',
-              steamAppId: null,
-            },
-            {
-              id: 4,
-              name: 'Starfield',
-              image: 'https://cdn.akamai.steamstatic.com/steam/apps/1716740/library_600x900.jpg',
-              releaseDate: 'Sep 2023',
-              studio: 'Bethesda Game Studios',
-              steamAppId: '1716740',
-            },
-            {
-              id: 5,
-              name: 'Spider-Man: Remastered',
-              image: 'https://cdn.akamai.steamstatic.com/steam/apps/1817070/library_600x900.jpg',
-              releaseDate: 'Aug 2022',
-              studio: 'Insomniac Games',
-              steamAppId: '1817070',
-            },
-            {
-              id: 6,
-              name: 'Hogwarts Legacy',
-              image: 'https://cdn.akamai.steamstatic.com/steam/apps/990080/library_600x900.jpg',
-              releaseDate: 'Feb 2023',
-              studio: 'Avalanche Software',
-              steamAppId: '990080',
-            },
-          ]
-          setRecentGames(defaultGames)
-          setNextGameId(7)
-          // Save default games to storage
-          for (const game of defaultGames) {
-            await storageService.addGame(userId, game)
-          }
+          // Empty library - no default games
+          setRecentGames([])
+          setNextGameId(1)
         }
       } catch (error) {
         console.error('Error loading games:', error)
@@ -168,6 +115,14 @@ function Dashboard() {
       setRecentGames(prevGames => [newGame, ...prevGames])
       setNextGameId(prevId => prevId + 1)
       setIsAddGameModalOpen(false)
+
+      // Scroll to beginning to show the newly added game
+      // Use setTimeout to ensure DOM has updated
+      setTimeout(() => {
+        if (gamesScrollRef.current) {
+          gamesScrollRef.current.scrollTo({ left: 0, behavior: 'smooth' })
+        }
+      }, 100)
     } catch (error) {
       console.error('Error adding game to library:', error)
       // Still close modal even if storage fails
@@ -276,14 +231,31 @@ function Dashboard() {
               </div>
 
               {/* Game Cards - Horizontal Scroll Container */}
-              <div className="flex gap-6 overflow-x-auto pb-4 flex-1" style={{ 
-                scrollbarWidth: 'thin',
-                scrollbarColor: '#4b5563 #1f2937'
-              }}>
-                {recentGames.map((game) => (
-                  <GameCard key={game.id} game={game} />
-                ))}
-              </div>
+              {recentGames.length > 0 ? (
+                <div 
+                  ref={gamesScrollRef}
+                  className="flex gap-6 overflow-x-auto pb-4 flex-1" 
+                  style={{ 
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: '#4b5563 #1f2937'
+                  }}
+                >
+                  {recentGames.map((game) => (
+                    <GameCard key={game.id} game={game} />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <p className="text-gray-400 text-lg">
+                      You don't have any games in your library yet
+                    </p>
+                    <p className="text-gray-500 text-sm mt-2">
+                      Click the card on the left to add your first game!
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

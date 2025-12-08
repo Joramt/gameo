@@ -25,7 +25,17 @@ function AddGameModal({ isOpen, onClose, onAddGame, library = [] }) {
       setIsSearching(true)
       try {
         // Use backend API endpoint (fallback to CORS proxy only if backend is completely unavailable)
-        const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+        let backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+        
+        // Ensure backendUrl is absolute (has protocol)
+        if (backendUrl && !backendUrl.startsWith('http://') && !backendUrl.startsWith('https://')) {
+          // If it's just a domain, add https://
+          backendUrl = `https://${backendUrl}`
+        }
+        
+        // Remove trailing slash if present
+        backendUrl = backendUrl.replace(/\/$/, '')
+        
         const searchEndpoint = `${backendUrl}/api/steam/search?q=${encodeURIComponent(searchValue)}`
         
         let useBackend = true
