@@ -11,6 +11,17 @@ export default defineConfig({
       overlay: true, // Show error overlay in browser
     },
   },
+  // Preview server configuration for Railway/production
+  preview: {
+    host: '0.0.0.0', // Listen on all network interfaces
+    port: process.env.PORT || 5173,
+    strictPort: false,
+    // Allow all Railway hosts
+    allowedHosts: [
+      'localhost',
+      '.railway.app', // Allows all Railway subdomains
+    ],
+  },
   // Optimize for faster HMR
   optimizeDeps: {
     include: ['react', 'react-dom', 'react-router-dom'],
