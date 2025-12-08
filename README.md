@@ -80,6 +80,26 @@ gameo/
 
 ## Production Deployment
 
+### Quick Deploy to Railway (Recommended)
+
+For the fastest deployment with both frontend and backend, see [RAILWAY_QUICK_START.md](./RAILWAY_QUICK_START.md) for a 10-minute setup guide.
+
+### Railway Deployment Guide
+
+For detailed Railway deployment instructions, see [RAILWAY_DEPLOYMENT.md](./RAILWAY_DEPLOYMENT.md).
+
+### Alternative: Netlify Deployment
+
+For Netlify deployment (frontend only, backend separate), see:
+- [QUICK_DEPLOY.md](./QUICK_DEPLOY.md) - Quick 5-minute guide
+- [NETLIFY_DEPLOYMENT.md](./NETLIFY_DEPLOYMENT.md) - Full deployment guide
+
+### Deployment Checklist
+
+Before deploying, review [DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md) to ensure everything is configured correctly.
+
+### Production Requirements
+
 For a complete list of requirements to move from development to production, see [PRODUCTION_TODO.md](./PRODUCTION_TODO.md).
 
 Key production requirements include:
