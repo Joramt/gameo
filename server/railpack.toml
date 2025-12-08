@@ -1,0 +1,10 @@
+[build]
+# Railpack automatically detects Node.js projects
+# No configuration needed - it will:
+# 1. Detect package.json
+# 2. Run npm install
+# 3. Use npm start to run the app
+
+[start]
+cmd = "npm start"
+
