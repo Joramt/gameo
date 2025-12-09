@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react'
 import GameCard from './GameCard'
 import AddGameCard from './AddGameCard'
 import AddGameModal from './AddGameModal'
+import GameInfoModal from './GameInfoModal'
 import { storageService } from '../services/storage'
 
 const domain = import.meta.env.VITE_AUTH0_DOMAIN
@@ -24,6 +25,9 @@ function Dashboard() {
 
   const [recentGames, setRecentGames] = useState([])
   const [isAddGameModalOpen, setIsAddGameModalOpen] = useState(false)
+  const [isGameInfoModalOpen, setIsGameInfoModalOpen] = useState(false)
+  const [selectedGame, setSelectedGame] = useState(null)
+  const [isTimeOnlyMode, setIsTimeOnlyMode] = useState(false)
   const [isLoadingGames, setIsLoadingGames] = useState(true)
   const [nextGameId, setNextGameId] = useState(1)
   const gamesScrollRef = useRef(null)
@@ -76,6 +80,28 @@ function Dashboard() {
     setIsAddGameModalOpen(false)
   }
 
+  const handleTimerClick = (game) => {
+    setSelectedGame(game)
+    setIsTimeOnlyMode(true)
+    setIsGameInfoModalOpen(true)
+  }
+
+  const handleSaveGameInfo = async (gameInfo) => {
+    try {
+      // Update game in storage
+      await storageService.updateGame(userId, gameInfo.id, gameInfo)
+
+      // Update local state
+      setRecentGames(prevGames =>
+        prevGames.map(game =>
+          game.id === gameInfo.id ? gameInfo : game
+        )
+      )
+    } catch (error) {
+      console.error('Error saving game info:', error)
+    }
+  }
+
   const handleAddGameToLibrary = async (gameData) => {
     try {
       // Check if game is already in library using storage service
@@ -123,6 +149,11 @@ function Dashboard() {
       setRecentGames(prevGames => [newGame, ...prevGames])
       setNextGameId(prevId => prevId + 1)
       setIsAddGameModalOpen(false)
+
+      // Open game info modal to collect information
+      setSelectedGame(newGame)
+      setIsTimeOnlyMode(false)
+      setIsGameInfoModalOpen(true)
 
       // Reset mobile scroll index to show the new game
       setCurrentGameIndex(0)
@@ -264,7 +295,11 @@ function Dashboard() {
                     }}
                   >
                     {recentGames.map((game) => (
-                      <GameCard key={game.id} game={game} />
+                      <GameCard 
+                        key={game.id} 
+                        game={game}
+                        onTimerClick={handleTimerClick}
+                      />
                     ))}
                   </div>
                 ) : (
@@ -351,7 +386,10 @@ function Dashboard() {
                         key={game.id} 
                         className="flex-shrink-0 w-full h-full flex items-center justify-center self-center"
                       >
-                        <GameCard game={game} />
+                        <GameCard 
+                          game={game}
+                          onTimerClick={handleTimerClick}
+                        />
                       </div>
                     ))}
                   </div>
@@ -379,6 +417,18 @@ function Dashboard() {
         onClose={handleCloseModal}
         onAddGame={handleAddGameToLibrary}
         library={recentGames}
+      />
+
+      {/* Game Info Modal */}
+      <GameInfoModal
+        isOpen={isGameInfoModalOpen}
+        onClose={() => {
+          setIsGameInfoModalOpen(false)
+          setSelectedGame(null)
+        }}
+        onSave={handleSaveGameInfo}
+        game={selectedGame}
+        isTimeOnly={isTimeOnlyMode}
       />
     </div>
   )

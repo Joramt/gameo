@@ -50,6 +50,17 @@ class StorageInterface {
   async hasGame(userId, gameId, steamAppId = null) {
     throw new Error('hasGame must be implemented')
   }
+
+  /**
+   * Update game information
+   * @param {string} userId - User identifier
+   * @param {string|number} gameId - Game ID to update
+   * @param {Object} updates - Game properties to update
+   * @returns {Promise<Object>} Updated game object
+   */
+  async updateGame(userId, gameId, updates) {
+    throw new Error('updateGame must be implemented')
+  }
 }
 
 /**
@@ -163,6 +174,33 @@ class SessionStorageService extends StorageInterface {
     } catch (error) {
       console.error('Error checking game in sessionStorage:', error)
       return false
+    }
+  }
+
+  /**
+   * Update game information
+   */
+  async updateGame(userId, gameId, updates) {
+    try {
+      const games = await this.getGames(userId)
+      const gameIndex = games.findIndex(
+        g => g.id === gameId || String(g.id) === String(gameId)
+      )
+
+      if (gameIndex === -1) {
+        throw new Error('Game not found')
+      }
+
+      const updatedGame = { ...games[gameIndex], ...updates }
+      games[gameIndex] = updatedGame
+
+      const key = this.getUserKey(userId)
+      sessionStorage.setItem(key, JSON.stringify(games))
+
+      return updatedGame
+    } catch (error) {
+      console.error('Error updating game in sessionStorage:', error)
+      throw error
     }
   }
 }
