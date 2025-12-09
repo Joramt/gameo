@@ -384,7 +384,7 @@ function Dashboard() {
                     {recentGames.map((game) => (
                       <div 
                         key={game.id} 
-                        className="flex-shrink-0 w-full h-full flex items-center justify-center self-center"
+                        className="flex-shrink-0 w-full h-full flex justify-center self-center"
                       >
                         <GameCard 
                           game={game}
