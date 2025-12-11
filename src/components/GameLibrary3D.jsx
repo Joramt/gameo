@@ -1,9 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg'
 
 function GameLibrary3D({ games = [] }) {
+  const [selectedGame, setSelectedGame] = useState(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
   const mountRef = useRef(null)
   const sceneRef = useRef(null)
   const cameraRef = useRef(null)
@@ -740,7 +742,49 @@ function GameLibrary3D({ games = [] }) {
 
     // Mouse controls for horizontal and vertical rotation
     const handleMouseDown = (e) => {
-      // Start camera dragging
+      // Only process clicks on the canvas
+      const rect = rendererRef.current?.domElement.getBoundingClientRect()
+      if (!rect) return
+      
+      const mouseX = e.clientX - rect.left
+      const mouseY = e.clientY - rect.top
+      
+      // Check if click is within canvas bounds
+      if (mouseX < 0 || mouseX > rect.width || mouseY < 0 || mouseY > rect.height) {
+        return
+      }
+      
+      // First check if clicking on a game box
+      if (gameBoxesRef.current.length > 0 && rendererRef.current && cameraRef.current) {
+        // Calculate mouse position in normalized device coordinates relative to canvas
+        mouseRef.current.x = (mouseX / rect.width) * 2 - 1
+        mouseRef.current.y = -(mouseY / rect.height) * 2 + 1
+        
+        // Update raycaster
+        raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current)
+        
+        // Check for intersections with game boxes
+        const intersects = raycasterRef.current.intersectObjects(gameBoxesRef.current, false)
+        
+        if (intersects.length > 0) {
+          // Clicked on a game box - open modal
+          const clickedBox = intersects[0].object
+          const game = clickedBox.userData.game
+          if (game) {
+            setSelectedGame(game)
+            setIsModalOpen(true)
+            e.preventDefault()
+            e.stopPropagation()
+            // Small delay to prevent camera drag from starting
+            setTimeout(() => {
+              isDraggingRef.current = false
+            }, 0)
+            return // Don't start camera dragging
+          }
+        }
+      }
+      
+      // No game box clicked, start camera dragging
       isDraggingRef.current = true
       lastMouseXRef.current = e.clientX || e.touches?.[0]?.clientX || 0
       lastMouseYRef.current = e.clientY || e.touches?.[0]?.clientY || 0
@@ -848,7 +892,46 @@ function GameLibrary3D({ games = [] }) {
 
     // Touch controls for mobile
     const handleTouchStart = (e) => {
-      e.preventDefault()
+      // Only process touches on the canvas
+      const rect = rendererRef.current?.domElement.getBoundingClientRect()
+      if (!rect) return
+      
+      const touch = e.touches[0]
+      const touchX = touch.clientX - rect.left
+      const touchY = touch.clientY - rect.top
+      
+      // Check if touch is within canvas bounds
+      if (touchX < 0 || touchX > rect.width || touchY < 0 || touchY > rect.height) {
+        return
+      }
+      
+      // First check if touching a game box
+      if (gameBoxesRef.current.length > 0 && rendererRef.current && cameraRef.current && e.touches.length === 1) {
+        // Calculate touch position in normalized device coordinates
+        mouseRef.current.x = (touchX / rect.width) * 2 - 1
+        mouseRef.current.y = -(touchY / rect.height) * 2 + 1
+        
+        // Update raycaster
+        raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current)
+        
+        // Check for intersections with game boxes
+        const intersects = raycasterRef.current.intersectObjects(gameBoxesRef.current, false)
+        
+        if (intersects.length > 0) {
+          // Touched a game box - open modal
+          const clickedBox = intersects[0].object
+          const game = clickedBox.userData.game
+          if (game) {
+            setSelectedGame(game)
+            setIsModalOpen(true)
+            e.preventDefault()
+            e.stopPropagation()
+            return // Don't start camera dragging
+          }
+        }
+      }
+      
+      // No game box touched, start camera dragging
       if (e.touches.length === 1) {
         isDraggingRef.current = true
         lastMouseXRef.current = e.touches[0].clientX
@@ -1025,17 +1108,422 @@ function GameLibrary3D({ games = [] }) {
   }, [games])
 
   return (
-    <div 
-      ref={mountRef} 
-      className="w-full h-[500px] md:h-[600px] rounded-xl overflow-hidden border border-gray-700 mt-8 relative"
-      style={{ cursor: 'grab' }}
+    <>
+      <div 
+        ref={mountRef} 
+        className="w-full h-[500px] md:h-[600px] rounded-xl overflow-hidden border border-gray-700 mt-8 relative"
+        style={{ cursor: 'grab' }}
+      >
+        <div
+          ref={fpsCounterRef}
+          className="absolute top-2 right-2 bg-black bg-opacity-70 text-white text-sm font-mono px-2 py-1 rounded z-10 pointer-events-none"
+          style={{ fontFamily: 'monospace' }}
+        >
+          0 FPS
+        </div>
+      </div>
+      
+      {/* Game Detail Modal */}
+      {isModalOpen && selectedGame && (
+        <GameDetailModal
+          game={selectedGame}
+          onClose={() => {
+            setIsModalOpen(false)
+            setSelectedGame(null)
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+// Modal component for displaying game 3D model
+function GameDetailModal({ game, onClose }) {
+  const modalRef = useRef(null)
+  const mountRef = useRef(null)
+  const sceneRef = useRef(null)
+  const cameraRef = useRef(null)
+  const rendererRef = useRef(null)
+  const boxMeshRef = useRef(null)
+  const isDraggingRef = useRef(false)
+  const lastMouseXRef = useRef(0)
+  const lastMouseYRef = useRef(0)
+  const rotationXRef = useRef(0)
+  const rotationYRef = useRef(0)
+  const zoomLevelRef = useRef(1.7) // Initial camera distance (zoomed out)
+  const lastPinchDistanceRef = useRef(0)
+  const isZoomedInRef = useRef(false) // Track zoom state
+
+  useEffect(() => {
+    if (!mountRef.current || !game) return
+
+    const scene = new THREE.Scene()
+    scene.background = new THREE.Color(0x273446) // Background color #273446
+    sceneRef.current = scene
+
+    // Camera setup
+    const camera = new THREE.PerspectiveCamera(
+      50,
+      mountRef.current.clientWidth / mountRef.current.clientHeight,
+      0.1,
+      1000
+    )
+    const initialZoom = zoomLevelRef.current
+    camera.position.set(0, 0, initialZoom)
+    camera.lookAt(0, 0, 0)
+    cameraRef.current = camera
+
+    // Renderer setup
+    const renderer = new THREE.WebGLRenderer({ 
+      antialias: true,
+      alpha: true,
+      powerPreference: "high-performance"
+    })
+    renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight)
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.shadowMap.enabled = true
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    renderer.outputColorSpace = THREE.SRGBColorSpace
+    mountRef.current.appendChild(renderer.domElement)
+    rendererRef.current = renderer
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
+    scene.add(ambientLight)
+
+    const mainLight = new THREE.DirectionalLight(0xffffff, 0.8)
+    mainLight.position.set(5, 5, 5)
+    mainLight.castShadow = true
+    scene.add(mainLight)
+
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.4)
+    fillLight.position.set(-5, 0, -5)
+    scene.add(fillLight)
+
+    // Create the game box
+    const ps5Blue = 0x003087
+    const boxWidth = 0.55
+    const boxHeight = 0.77
+    const boxDepth = 0.0264
+
+    const boxGeometry = new RoundedBoxGeometry(
+      boxWidth,
+      boxHeight,
+      boxDepth,
+      3,
+      0.005
+    )
+
+    const ps5MaterialProps = {
+      color: ps5Blue,
+      transparent: true,
+      opacity: 0.85,
+      roughness: 0.2,
+      metalness: 0.1,
+      flatShading: false
+    }
+
+    const materials = [
+      new THREE.MeshStandardMaterial(ps5MaterialProps),
+      new THREE.MeshStandardMaterial(ps5MaterialProps),
+      new THREE.MeshStandardMaterial(ps5MaterialProps),
+      new THREE.MeshStandardMaterial(ps5MaterialProps),
+      new THREE.MeshStandardMaterial(ps5MaterialProps),
+      new THREE.MeshStandardMaterial(ps5MaterialProps)
+    ]
+
+    const boxMesh = new THREE.Mesh(boxGeometry, materials)
+    boxMesh.castShadow = true
+    boxMesh.receiveShadow = true
+    boxMeshRef.current = boxMesh
+    scene.add(boxMesh)
+
+    // Load game cover image if available
+    if (game.image) {
+      const textureLoader = new THREE.TextureLoader()
+      textureLoader.load(
+        game.image,
+        (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace
+          const maxAnisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 16)
+          texture.anisotropy = maxAnisotropy
+          texture.minFilter = THREE.LinearMipmapLinearFilter
+          texture.magFilter = THREE.LinearFilter
+          texture.generateMipmaps = true
+          
+          materials[4] = new THREE.MeshStandardMaterial({
+            map: texture,
+            transparent: true,
+            opacity: 0.9,
+            roughness: 0.2,
+            metalness: 0.1,
+            flatShading: false
+          })
+          boxMesh.material = materials
+        },
+        undefined,
+        (error) => {
+          console.warn('Failed to load game cover:', game.name, error)
+        }
+      )
+    }
+
+    // Mouse/touch controls for rotation
+    const handleMouseDown = (e) => {
+      e.stopPropagation() // Prevent modal from closing
+      isDraggingRef.current = true
+      lastMouseXRef.current = e.clientX || e.touches?.[0]?.clientX || 0
+      lastMouseYRef.current = e.clientY || e.touches?.[0]?.clientY || 0
+      if (mountRef.current) {
+        mountRef.current.style.cursor = 'grabbing'
+      }
+    }
+
+    const handleMouseMove = (e) => {
+      if (!isDraggingRef.current) return
+      
+      e.preventDefault() // Prevent scrolling on mobile
+      e.stopPropagation() // Prevent modal from closing
+      
+      const eventClientX = e.clientX || e.touches?.[0]?.clientX || 0
+      const eventClientY = e.clientY || e.touches?.[0]?.clientY || 0
+      const deltaX = eventClientX - lastMouseXRef.current
+      const deltaY = eventClientY - lastMouseYRef.current
+      
+      const sensitivity = 0.01
+      rotationYRef.current += deltaX * sensitivity
+      rotationXRef.current += deltaY * sensitivity
+      
+      // Limit vertical rotation
+      rotationXRef.current = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotationXRef.current))
+      
+      lastMouseXRef.current = eventClientX
+      lastMouseYRef.current = eventClientY
+    }
+
+    const handleMouseUp = () => {
+      isDraggingRef.current = false
+      if (mountRef.current) {
+        mountRef.current.style.cursor = 'grab'
+      }
+    }
+
+    const handleTouchStart = (e) => {
+      e.stopPropagation() // Prevent modal from closing
+      // Only handle single touch for rotation
+      if (e.touches.length === 1) {
+        handleMouseDown(e)
+      }
+    }
+
+    const handleTouchMove = (e) => {
+      // If two touches, prioritize pinch zoom (handled in handleTouchMoveZoom)
+      if (e.touches.length === 2) {
+        return
+      }
+      // Single touch for rotation
+      if (isDraggingRef.current && e.touches.length === 1) {
+        e.preventDefault() // Prevent scrolling
+        e.stopPropagation() // Prevent modal from closing
+        handleMouseMove(e)
+      }
+    }
+
+    const handleTouchEnd = (e) => {
+      e.stopPropagation() // Prevent modal from closing
+      handleMouseUp()
+      // Reset pinch distance when touch ends
+      if (e.touches.length === 0) {
+        lastPinchDistanceRef.current = 0
+      }
+    }
+
+    // Zoom controls - toggle between 0.8 (zoomed in) and 1.7 (zoomed out)
+    const handleWheel = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      
+      // Toggle zoom state based on scroll direction
+      if (e.deltaY > 0) {
+        // Scrolling down - zoom out to 1.7
+        zoomLevelRef.current = 1.7
+        isZoomedInRef.current = false
+        console.log('Zoom level: 1.70 (zoomed out)')
+      } else {
+        // Scrolling up - zoom in to 0.8
+        zoomLevelRef.current = 0.8
+        isZoomedInRef.current = true
+        console.log('Zoom level: 0.80 (zoomed in)')
+      }
+    }
+
+    // Pinch-to-zoom for mobile
+    const handleTouchStartZoom = (e) => {
+      if (e.touches.length === 2) {
+        // Calculate distance between two touches
+        const touch1 = e.touches[0]
+        const touch2 = e.touches[1]
+        const distance = Math.hypot(
+          touch2.clientX - touch1.clientX,
+          touch2.clientY - touch1.clientY
+        )
+        lastPinchDistanceRef.current = distance
+      }
+    }
+
+    const handleTouchMoveZoom = (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault()
+        e.stopPropagation()
+        
+        // Calculate current distance between two touches
+        const touch1 = e.touches[0]
+        const touch2 = e.touches[1]
+        const currentDistance = Math.hypot(
+          touch2.clientX - touch1.clientX,
+          touch2.clientY - touch1.clientY
+        )
+        
+        if (lastPinchDistanceRef.current > 0) {
+          // Calculate zoom delta based on pinch distance change
+          const distanceDelta = currentDistance - lastPinchDistanceRef.current
+          
+          // Toggle zoom based on pinch direction
+          // Pinching out (increasing distance) = zoom in
+          // Pinching in (decreasing distance) = zoom out
+          if (distanceDelta > 10) {
+            // Pinching out - zoom in to 0.8
+            zoomLevelRef.current = 0.8
+            isZoomedInRef.current = true
+            console.log('Zoom level: 0.80 (zoomed in)')
+          } else if (distanceDelta < -10) {
+            // Pinching in - zoom out to 1.7
+            zoomLevelRef.current = 1.7
+            isZoomedInRef.current = false
+            console.log('Zoom level: 1.70 (zoomed out)')
+          }
+        }
+        
+        lastPinchDistanceRef.current = currentDistance
+      }
+    }
+
+    renderer.domElement.addEventListener('mousedown', handleMouseDown)
+    renderer.domElement.addEventListener('mousemove', handleMouseMove)
+    renderer.domElement.addEventListener('mouseup', handleMouseUp)
+    renderer.domElement.addEventListener('mouseleave', handleMouseUp)
+    renderer.domElement.addEventListener('wheel', handleWheel, { passive: false })
+    renderer.domElement.addEventListener('touchstart', handleTouchStart)
+    renderer.domElement.addEventListener('touchstart', handleTouchStartZoom)
+    renderer.domElement.addEventListener('touchmove', handleTouchMove)
+    renderer.domElement.addEventListener('touchmove', handleTouchMoveZoom)
+    renderer.domElement.addEventListener('touchend', handleTouchEnd)
+
+    // Animation loop
+    const animate = () => {
+      requestAnimationFrame(animate)
+
+      // Apply rotation to box
+      if (boxMeshRef.current) {
+        boxMeshRef.current.rotation.y = rotationYRef.current
+        boxMeshRef.current.rotation.x = rotationXRef.current
+      }
+
+      // Apply zoom to camera - smooth interpolation
+      const targetZoom = zoomLevelRef.current
+      const currentZ = camera.position.z
+      const zoomSpeed = 0.15 // Smooth zoom transition
+      camera.position.z += (targetZoom - currentZ) * zoomSpeed
+      camera.lookAt(0, 0, 0)
+
+      renderer.render(scene, camera)
+    }
+    animate()
+
+    // Handle window resize
+    const handleResize = () => {
+      if (!mountRef.current) return
+      
+      camera.aspect = mountRef.current.clientWidth / mountRef.current.clientHeight
+      camera.updateProjectionMatrix()
+      renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight)
+    }
+    window.addEventListener('resize', handleResize)
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      renderer.domElement.removeEventListener('mousedown', handleMouseDown)
+      renderer.domElement.removeEventListener('mousemove', handleMouseMove)
+      renderer.domElement.removeEventListener('mouseup', handleMouseUp)
+      renderer.domElement.removeEventListener('mouseleave', handleMouseUp)
+      renderer.domElement.removeEventListener('wheel', handleWheel)
+      renderer.domElement.removeEventListener('touchstart', handleTouchStart)
+      renderer.domElement.removeEventListener('touchstart', handleTouchStartZoom)
+      renderer.domElement.removeEventListener('touchmove', handleTouchMove)
+      renderer.domElement.removeEventListener('touchmove', handleTouchMoveZoom)
+      renderer.domElement.removeEventListener('touchend', handleTouchEnd)
+
+      if (mountRef.current && renderer.domElement.parentNode) {
+        renderer.domElement.parentNode.removeChild(renderer.domElement)
+      }
+
+      scene.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          object.geometry?.dispose()
+          if (Array.isArray(object.material)) {
+            object.material.forEach(material => {
+              material.map?.dispose()
+              material.dispose()
+            })
+          } else {
+            object.material.map?.dispose()
+            object.material.dispose()
+          }
+        }
+      })
+
+      renderer.dispose()
+    }
+  }, [game])
+
+  return (
+    <div
+      ref={modalRef}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Game 3D view"
     >
       <div
-        ref={fpsCounterRef}
-        className="absolute top-2 right-2 bg-black bg-opacity-70 text-white text-sm font-mono px-2 py-1 rounded z-10 pointer-events-none"
-        style={{ fontFamily: 'monospace' }}
+        className="bg-gray-800 rounded-2xl p-6 md:p-8 w-full max-w-4xl mx-4 shadow-2xl flex flex-col"
+        style={{ maxHeight: '90vh' }}
+        onClick={(e) => e.stopPropagation()}
       >
-        0 FPS
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-white">{game.name}</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-white transition-colors text-3xl font-bold leading-none"
+            aria-label="Close modal"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* 3D Viewport */}
+        <div 
+          ref={mountRef} 
+          className="flex-1 w-full rounded-lg overflow-hidden bg-gray-900"
+          style={{ cursor: 'grab', minHeight: '400px' }}
+        />
+
+        {/* Footer */}
+        <div className="mt-6 text-center text-sm text-gray-400">
+          Drag to rotate • Click outside to close
+        </div>
       </div>
     </div>
   )
