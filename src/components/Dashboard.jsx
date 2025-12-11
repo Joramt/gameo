@@ -5,6 +5,7 @@ import GameCard from './GameCard'
 import AddGameCard from './AddGameCard'
 import AddGameModal from './AddGameModal'
 import GameInfoModal from './GameInfoModal'
+import GameLibrary3D from './GameLibrary3D'
 import { storageService } from '../services/storage'
 
 const domain = import.meta.env.VITE_AUTH0_DOMAIN
@@ -125,10 +126,13 @@ function Dashboard() {
         })
       }
 
-      // Get library image URL (Steam library_600x900 format)
-      // If we have a steamAppId, use the library image URL, otherwise use the cover image
+      // Use the same image as shown in search results (header_image, typically 380x640 or higher)
+      // This ensures consistency between search and library display
       let imageUrl = gameData.cover
-      if (gameData.steamAppId) {
+      
+      // If we have a steamAppId but no cover, try to get a high-res library image
+      // Otherwise, use the cover image from search (which is header_image)
+      if (gameData.steamAppId && !imageUrl) {
         imageUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${gameData.steamAppId}/library_600x900.jpg`
       }
 
@@ -250,12 +254,36 @@ function Dashboard() {
       {/* Dashboard Content */}
       <div className="container mx-auto px-6 py-6 md:py-12">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
-            Welcome back, {user?.name?.split(' ')[0] || 'Gamer'}! 🎮
-          </h1>
-          <p className="text-gray-400 mb-4 md:mb-8 text-sm md:text-base" id="games-description">
-            Here are your recently added games
-          </p>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4 md:mb-8">
+            <div>
+              <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
+                Welcome back, {user?.name?.split(' ')[0] || 'Gamer'}! 🎮
+              </h1>
+              <p className="text-gray-400 text-sm md:text-base" id="games-description">
+                Here are your recently added games
+              </p>
+            </div>
+            <button
+              onClick={handleAddGame}
+              className="mt-4 md:mt-0 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+              aria-label="Add a new game to your library"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+              New Game
+            </button>
+          </div>
 
           {/* Recent Games - Horizontal Scroll with Fixed Add Game Card */}
           {isLoadingGames ? (
@@ -408,6 +436,17 @@ function Dashboard() {
               )}
             </>
           )}
+
+          {/* 3D Library Room */}
+          <div className="mt-8 md:mt-12">
+            <h2 className="text-2xl md:text-3xl font-bold text-white mb-4">
+              Your Game Library
+            </h2>
+            <p className="text-gray-400 mb-6 text-sm md:text-base">
+              Explore your collection in 3D • Drag to look around
+            </p>
+            <GameLibrary3D games={recentGames} />
+          </div>
         </div>
       </div>
 

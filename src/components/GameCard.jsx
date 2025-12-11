@@ -24,11 +24,11 @@ function GameCard({ game, onTimerClick, onCardClick }) {
   // Format time played
   const formatTimePlayed = (timePlayedMinutes) => {
     if (!timePlayedMinutes || timePlayedMinutes === 0) {
-      return '0h 0m'
+      return '0h'
     }
     const hours = Math.floor(timePlayedMinutes / 60)
     const minutes = timePlayedMinutes % 60
-    return `${hours}h ${minutes}m`
+    return `${hours}h ${ minutes != 0 ? minutes +'m' : ""}`
   }
 
   // Format date
@@ -84,6 +84,11 @@ function GameCard({ game, onTimerClick, onCardClick }) {
               alt={game.name}
               className="w-full h-full object-fill transition-transform duration-300 group-hover:scale-110"
               loading="lazy"
+              style={{
+                // Ensure high-quality image rendering on mobile
+                imageRendering: '-webkit-optimize-contrast',
+                WebkitImageRendering: 'high-quality'
+              }}
               onError={(e) => {
                 e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="222" height="334"%3E%3Crect fill="%231f2937" width="222" height="334"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%236b7280" font-family="sans-serif" font-size="14"%3EImage not available%3C/text%3E%3C/svg%3E'
               }}
