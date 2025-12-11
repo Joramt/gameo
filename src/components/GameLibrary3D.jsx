@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg'
+import { PMREMGenerator } from 'three'
 
 function GameLibrary3D({ games = [] }) {
   const [selectedGame, setSelectedGame] = useState(null)
@@ -1195,25 +1196,39 @@ function GameDetailModal({ game, onClose }) {
       powerPreference: "high-performance"
     })
     renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight)
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    // Optimize pixel ratio for performance while maintaining quality
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+                     (window.innerWidth <= 768) || 
+                     ('ontouchstart' in window)
+    renderer.setPixelRatio(isMobile ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 2))
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFSoftShadowMap
     renderer.outputColorSpace = THREE.SRGBColorSpace
     mountRef.current.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
+    // Enhanced lighting for bright mirror-like reflections
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.0) // Increased intensity
     scene.add(ambientLight)
 
-    const mainLight = new THREE.DirectionalLight(0xffffff, 0.8)
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.2) // Brighter main light
     mainLight.position.set(5, 5, 5)
     mainLight.castShadow = true
+    // Optimize shadow map size for performance
+    mainLight.shadow.mapSize.width = 1024
+    mainLight.shadow.mapSize.height = 1024
+    mainLight.shadow.camera.near = 0.1
+    mainLight.shadow.camera.far = 50
     scene.add(mainLight)
 
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.4)
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.8) // Brighter fill light
     fillLight.position.set(-5, 0, -5)
     scene.add(fillLight)
+    
+    // Add additional light from behind camera to brighten reflections
+    const backLight = new THREE.DirectionalLight(0xffffff, 0.6)
+    backLight.position.set(0, 0, 5) // Behind camera
+    scene.add(backLight)
 
     // Add white background plane behind camera for CD reflections
     // Position it behind the camera (positive Z) so it reflects on the CD
@@ -1355,13 +1370,13 @@ function GameDetailModal({ game, onClose }) {
     // Create CD ROM disc (highly reflective, with hole in center)
     // CD is typically 12cm diameter, but we'll scale it to fit nicely in the box
     // CD dimensions already defined above (cdOuterRadius, cdInnerRadius, cdThickness)
-    // Use very high segment count for perfectly smooth, mirror-like surface
-    const cdSegments = 256 // Very high number of segments for perfectly smooth circle (mirror quality)
+    // Optimized segment count: 256 is sufficient for smooth appearance without performance hit
+    const cdSegments = 256 // High enough for smooth circle, optimized for performance
     
     // Create CD geometry using a cylinder and subtract the center hole with CSG
     const cdGeometry = new THREE.CylinderGeometry(cdOuterRadius, cdOuterRadius, cdThickness, cdSegments)
     
-    // Create hole geometry (slightly taller to ensure clean subtraction, also high segments)
+    // Create hole geometry (slightly taller to ensure clean subtraction, optimized segments)
     const holeGeometry = new THREE.CylinderGeometry(cdInnerRadius, cdInnerRadius, cdThickness + 0.0002, 128)
     
     // Use CSG to subtract the hole from the disc
@@ -1378,53 +1393,82 @@ function GameDetailModal({ game, onClose }) {
     // Smooth the geometry to remove any faceting
     // This ensures the surface is perfectly smooth for mirror reflections
     const smoothGeometry = cdResult.geometry.clone()
+    // Compute smooth normals to eliminate faceting
     smoothGeometry.computeVertexNormals()
+    // Ensure all faces are smooth (no hard edges)
+    smoothGeometry.normalizeNormals()
     cdResult.geometry = smoothGeometry
     
-    // Create a rich environment map for mirror-like CD reflections with iridescent colors
-    // Create cube texture with white background and color gradients for rainbow effect
-    const envMapSize = 512 // Higher resolution for better reflections
-    const envMapCanvas = document.createElement('canvas')
-    envMapCanvas.width = envMapSize
-    envMapCanvas.height = envMapSize
-    const envMapContext = envMapCanvas.getContext('2d')
+    // Create cloud sky texture programmatically (matching the cloud image description)
+    // Bright blue sky with white fluffy clouds
+    const createCloudSkyTexture = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = 2048
+      canvas.height = 1024
+      const ctx = canvas.getContext('2d')
+      
+      // Bright blue sky background
+      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height)
+      gradient.addColorStop(0, '#87CEEB') // Sky blue at top
+      gradient.addColorStop(1, '#4682B4') // Deeper blue at bottom
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      
+      // Draw white fluffy clouds
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+      for (let i = 0; i < 30; i++) {
+        const x = Math.random() * canvas.width
+        const y = Math.random() * canvas.height * 0.7 // Clouds in upper portion
+        const size = 50 + Math.random() * 150
+        
+        // Draw cloud blob
+        ctx.beginPath()
+        ctx.arc(x, y, size, 0, Math.PI * 2)
+        ctx.arc(x + size * 0.6, y, size * 0.8, 0, Math.PI * 2)
+        ctx.arc(x - size * 0.6, y, size * 0.8, 0, Math.PI * 2)
+        ctx.arc(x, y - size * 0.5, size * 0.7, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      
+      return canvas
+    }
     
-    // Create gradient from white (center) to colors (edges) for iridescent effect
-    const gradient = envMapContext.createRadialGradient(
-      envMapSize / 2, envMapSize / 2, 0,
-      envMapSize / 2, envMapSize / 2, envMapSize / 2
-    )
-    gradient.addColorStop(0, '#ffffff') // White center (bright reflection)
-    gradient.addColorStop(0.3, '#e0f2ff') // Light blue
-    gradient.addColorStop(0.5, '#d0ffd0') // Light green
-    gradient.addColorStop(0.7, '#fff0d0') // Light yellow/orange
-    gradient.addColorStop(1, '#f0d0ff') // Light purple
+    // Load cloud image and convert to environment map for realistic reflections
+    // Using PMREMGenerator to convert equirectangular image to cube map
+    const textureLoader = new THREE.TextureLoader()
+    const pmremGenerator = new THREE.PMREMGenerator(renderer)
+    pmremGenerator.compileEquirectangularShader()
     
-    envMapContext.fillStyle = gradient
-    envMapContext.fillRect(0, 0, envMapSize, envMapSize)
+    // Create cloud sky texture
+    const cloudCanvas = createCloudSkyTexture()
+    const cloudTexture = new THREE.CanvasTexture(cloudCanvas)
+    cloudTexture.mapping = THREE.EquirectangularReflectionMapping
+    cloudTexture.colorSpace = THREE.SRGBColorSpace
     
-    const envMapTexture = new THREE.CanvasTexture(envMapCanvas)
-    envMapTexture.mapping = THREE.CubeReflectionMapping
-    envMapTexture.needsUpdate = true
+    // Convert equirectangular texture to cube map using PMREMGenerator
+    const envMap = pmremGenerator.fromEquirectangular(cloudTexture).texture
+    pmremGenerator.dispose()
+    cloudTexture.dispose() // Dispose original texture
     
-    // Use MeshPhysicalMaterial for true mirror-like reflections with iridescence
-    const cdMaterial = new THREE.MeshPhysicalMaterial({
-      color: 0xffffff, // White base color for bright reflections
-      metalness: 1.0, // Fully metallic for mirror-like surface
-      roughness: 0.0, // Perfectly smooth (zero roughness = mirror)
+    // Set as scene environment
+    scene.environment = envMap
+    
+    // Create temporary reference for CD material
+    let cdMaterialRef = null
+    
+    // Use MeshPhongMaterial for proper reflective shiny surface
+    // MeshLambertMaterial doesn't support specular reflections, so envMap won't work properly
+    // MeshPhongMaterial supports specular highlights and proper environment map reflections
+    const cdMaterial = new THREE.MeshPhongMaterial({
+      color: 0xc0c0c0, // Shiny silver grey base color
       side: THREE.DoubleSide,
-      transparent: true, // Enable transparency for tinted mirror effect
-      opacity: 0.98, // Slightly transparent
-      envMap: envMapTexture, // Use environment map for reflections
-      envMapIntensity: 2.0, // Strong environment reflection
-      iridescence: 1.0, // Full iridescence for rainbow effect (like real CDs)
-      iridescenceIOR: 1.3, // Index of refraction for iridescence
-      iridescenceThicknessRange: [100, 400], // Thickness range for iridescence effect
-      clearcoat: 1.0, // Clear coat layer for extra shine
-      clearcoatRoughness: 0.0, // Perfectly smooth clear coat
-      transmission: 0.1, // Slight transmission for light distortion
-      thickness: 0.0005 // Thin layer for transmission
+      envMap: envMap, // Use cloud sky environment map
+      combine: THREE.MixOperation, // Mix environment with material color
+      reflectivity: 1.0, // Maximum reflectivity for mirror-like surface
+      shininess: 100, // High shininess for sharp, mirror-like reflections
+      specular: 0xffffff // White specular highlights for maximum shine
     })
+    cdMaterialRef = cdMaterial
     
     // Apply material to the CSG result
     cdResult.material = cdMaterial
@@ -1676,9 +1720,20 @@ function GameDetailModal({ game, onClose }) {
     let frameCount = 0
     let fpsLastTime = performance.now()
 
-    // Animation loop
+    // Animation loop with performance optimizations
+    let lastRenderTime = 0
+    const targetFPS = 60
+    const frameInterval = 1000 / targetFPS
+    
     const animate = (currentTime) => {
       requestAnimationFrame(animate)
+      
+      // Throttle rendering to target FPS for consistent performance
+      const elapsed = currentTime - lastRenderTime
+      if (elapsed < frameInterval) {
+        return // Skip frame if too soon
+      }
+      lastRenderTime = currentTime - (elapsed % frameInterval)
       
       // Calculate FPS
       frameCount++
@@ -1929,9 +1984,17 @@ function GameDetailModal({ game, onClose }) {
         {/* 3D Viewport */}
         <div 
           ref={mountRef} 
-          className="flex-1 w-full rounded-lg overflow-hidden bg-gray-900"
+          className="flex-1 w-full rounded-lg overflow-hidden bg-gray-900 relative"
           style={{ cursor: 'grab', minHeight: '400px' }}
-        />
+        >
+          <div
+            ref={fpsCounterRef}
+            className="absolute top-2 right-2 bg-black bg-opacity-70 text-white text-sm font-mono px-2 py-1 rounded z-10 pointer-events-none"
+            style={{ fontFamily: 'monospace' }}
+          >
+            0 FPS
+          </div>
+        </div>
 
         {/* Footer */}
         <div className="mt-6 text-center text-sm text-gray-400">
