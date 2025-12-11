@@ -1153,6 +1153,21 @@ function GameDetailModal({ game, onClose }) {
   const zoomLevelRef = useRef(1.7) // Initial camera distance (zoomed out)
   const lastPinchDistanceRef = useRef(0)
   const isZoomedInRef = useRef(false) // Track zoom state
+  const isOpeningRef = useRef(false) // Track if box is opening
+  const isClosingRef = useRef(false) // Track if box is closing
+  const isResettingRef = useRef(false) // Track if box is resetting rotation before opening
+  const resetProgressRef = useRef(0) // Reset animation progress (0 to 1)
+  const openProgressRef = useRef(0) // Opening animation progress (0 to 1)
+  const frontCoverRef = useRef(null) // Reference to front cover mesh
+  const backCoverRef = useRef(null) // Reference to back cover mesh
+  const cdRomRef = useRef(null) // Reference to CD ROM disc
+  const boxGroupRef = useRef(null) // Reference to parent group containing both covers
+  const initialRotationXRef = useRef(0) // Store initial rotation X before reset
+  const initialRotationYRef = useRef(0) // Store initial rotation Y before reset
+  const clickStartTimeRef = useRef(0) // Track click start time
+  const clickStartXRef = useRef(0) // Track click start X position
+  const clickStartYRef = useRef(0) // Track click start Y position
+  const fpsCounterRef = useRef(null) // FPS counter element
 
   useEffect(() => {
     if (!mountRef.current || !game) return
@@ -1169,7 +1184,7 @@ function GameDetailModal({ game, onClose }) {
       1000
     )
     const initialZoom = zoomLevelRef.current
-    camera.position.set(0, 0, initialZoom)
+    camera.position.set(0, 0, zoomLevelRef.current) // Start at zoomed out position
     camera.lookAt(0, 0, 0)
     cameraRef.current = camera
 
@@ -1200,80 +1215,287 @@ function GameDetailModal({ game, onClose }) {
     fillLight.position.set(-5, 0, -5)
     scene.add(fillLight)
 
-    // Create the game box
+    // Add white background plane behind camera for CD reflections
+    // Position it behind the camera (positive Z) so it reflects on the CD
+    const backgroundPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(10, 10),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
+    )
+    // Position behind camera (camera is at z = zoomLevel, so place plane further back)
+    backgroundPlane.position.set(0, 0, 5) // Behind camera, facing forward
+    backgroundPlane.rotation.y = Math.PI // Face towards the scene (negative Z direction)
+    scene.add(backgroundPlane)
+
+    // Create the game box - split into front and back covers for opening animation
     const ps5Blue = 0x003087
     const boxWidth = 0.55
     const boxHeight = 0.77
     const boxDepth = 0.0264
 
-    const boxGeometry = new RoundedBoxGeometry(
-      boxWidth,
-      boxHeight,
-      boxDepth,
-      3,
-      0.005
-    )
-
     const ps5MaterialProps = {
       color: ps5Blue,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.6, // More transparent for CD case look
       roughness: 0.2,
       metalness: 0.1,
       flatShading: false
     }
 
-    const materials = [
-      new THREE.MeshStandardMaterial(ps5MaterialProps),
-      new THREE.MeshStandardMaterial(ps5MaterialProps),
-      new THREE.MeshStandardMaterial(ps5MaterialProps),
-      new THREE.MeshStandardMaterial(ps5MaterialProps),
-      new THREE.MeshStandardMaterial(ps5MaterialProps),
-      new THREE.MeshStandardMaterial(ps5MaterialProps)
+    // Create front cover (will open like a book)
+    // Each cover has half the depth so they stack perfectly
+    const coverDepth = boxDepth / 2
+    const frontCoverGeometry = new RoundedBoxGeometry(
+      boxWidth,
+      boxHeight,
+      coverDepth,
+      3,
+      0.005
+    )
+
+    const frontMaterials = [
+      new THREE.MeshStandardMaterial(ps5MaterialProps), // Right face
+      new THREE.MeshStandardMaterial(ps5MaterialProps), // Left face
+      new THREE.MeshStandardMaterial(ps5MaterialProps), // Top face
+      new THREE.MeshStandardMaterial(ps5MaterialProps), // Bottom face
+      new THREE.MeshStandardMaterial(ps5MaterialProps), // Front face (cover image goes here)
+      new THREE.MeshStandardMaterial(ps5MaterialProps)  // Back face
     ]
 
-    const boxMesh = new THREE.Mesh(boxGeometry, materials)
-    boxMesh.castShadow = true
-    boxMesh.receiveShadow = true
-    boxMeshRef.current = boxMesh
-    scene.add(boxMesh)
+    // Create a parent group for the entire box (for rotation around center)
+    const boxGroup = new THREE.Group()
+    boxGroupRef.current = boxGroup
+    
+    // Create a group to hold the front cover for rotation around left edge
+    const frontCoverGroup = new THREE.Group()
+    const frontCover = new THREE.Mesh(frontCoverGeometry, frontMaterials)
+    // Position cover so its left edge is at the origin of the group
+    // The cover's center is at (boxWidth/2, 0, 0) relative to group, so left edge is at group origin
+    frontCover.position.set(boxWidth / 2, 0, 0)
+    frontCover.castShadow = true
+    frontCover.receiveShadow = true
+    frontCoverGroup.add(frontCover)
+    // Position the group so the left edge aligns with back cover's left edge
+    // Both covers' left edges should be at x = -boxWidth / 2
+    // Front cover center at z = coverDepth / 2, so its back face (at z = 0) touches back cover's front face
+    // X position: -boxWidth/2 so left edge is at x = -boxWidth/2 (same as back cover)
+    frontCoverGroup.position.set(-boxWidth / 2, 0, coverDepth / 2)
+    frontCoverRef.current = frontCoverGroup // Store group reference
+    boxGroup.add(frontCoverGroup)
 
-    // Load game cover image if available
-    if (game.image) {
-      const textureLoader = new THREE.TextureLoader()
-      textureLoader.load(
-        game.image,
-        (texture) => {
-          texture.colorSpace = THREE.SRGBColorSpace
-          const maxAnisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 16)
-          texture.anisotropy = maxAnisotropy
-          texture.minFilter = THREE.LinearMipmapLinearFilter
-          texture.magFilter = THREE.LinearFilter
-          texture.generateMipmaps = true
-          
-          materials[4] = new THREE.MeshStandardMaterial({
-            map: texture,
-            transparent: true,
-            opacity: 0.9,
-            roughness: 0.2,
-            metalness: 0.1,
-            flatShading: false
-          })
-          boxMesh.material = materials
-        },
-        undefined,
-        (error) => {
-          console.warn('Failed to load game cover:', game.name, error)
-        }
-      )
+    // CD dimensions (define before using in CSG for both back cover hole and CD disc)
+    const cdOuterRadius = 0.2 // Outer radius of CD
+    const cdInnerRadius = 0.015 // Inner hole radius
+    const cdThickness = 0.001 // Very thin disc
+    
+    // Create back cover with a hole for the CD ROM
+    const backCoverGeometry = new RoundedBoxGeometry(
+      boxWidth,
+      boxHeight,
+      boxDepth / 2,
+      3,
+      0.005
+    )
+
+    const backMaterials = [
+      new THREE.MeshStandardMaterial(ps5MaterialProps), // Right face
+      new THREE.MeshStandardMaterial(ps5MaterialProps), // Left face
+      new THREE.MeshStandardMaterial(ps5MaterialProps), // Top face
+      new THREE.MeshStandardMaterial(ps5MaterialProps), // Bottom face
+      new THREE.MeshStandardMaterial(ps5MaterialProps), // Front face
+      new THREE.MeshStandardMaterial(ps5MaterialProps)  // Back face
+    ]
+    
+    // Create back cover with CSG to subtract CD hole
+    const backCoverBrush = new Brush(backCoverGeometry, backMaterials[0])
+    backCoverBrush.position.set(0, 0, -coverDepth / 2)
+    backCoverBrush.updateMatrixWorld()
+    
+    // Create hole geometry for CD (cylinder that will be subtracted from back cover)
+    // The hole should be cut ONLY from the front face (z = 0), NOT all the way through
+    // Back cover extends from z = -coverDepth (back) to z = 0 (front)
+    // Make the cylinder depth LESS than coverDepth so it only cuts from front, leaving back flat
+    const holeDepth = coverDepth * 0.8 // Cut only 80% through, leaving back face intact
+    const cdHoleGeometry = new THREE.CylinderGeometry(cdOuterRadius, cdOuterRadius, holeDepth, 64)
+    const cdHoleBrush = new Brush(cdHoleGeometry)
+    // Position hole so it cuts from the front face (z = 0) into the back cover
+    // But stops before reaching the back face, keeping the back flat
+    // Cylinder is rotated to be horizontal, so its center should be at z = -holeDepth/2
+    // This makes the front edge of the cylinder at z = 0 (front face)
+    // And the back edge at z = -holeDepth, which is less than -coverDepth, so back remains flat
+    cdHoleBrush.position.set(0, 0, -holeDepth / 2) // Position so front edge is at z = 0, back edge doesn't reach -coverDepth
+    cdHoleBrush.rotation.x = Math.PI / 2 // Rotate to be horizontal (perpendicular to front face)
+    cdHoleBrush.updateMatrixWorld()
+    
+    // Subtract the CD hole from the back cover
+    const backCoverEvaluator = new Evaluator()
+    let backCover = null
+    try {
+      backCover = backCoverEvaluator.evaluate(backCoverBrush, cdHoleBrush, SUBTRACTION)
+      backCover.geometry.computeVertexNormals()
+      backCover.geometry.computeBoundingBox()
+      backCover.geometry.computeBoundingSphere()
+      // Apply material array for proper face materials
+      backCover.material = backMaterials
+      backCover.castShadow = true
+      backCover.receiveShadow = true
+    } catch (error) {
+      console.error('Failed to create back cover with hole:', error)
+      // Fallback to simple back cover without hole
+      backCover = new THREE.Mesh(backCoverGeometry, backMaterials)
+      backCover.castShadow = true
+      backCover.receiveShadow = true
     }
+    
+    // Position back cover so its left edge aligns with front cover's left edge
+    // Back cover center at z = -coverDepth / 2, so its front face (at z = 0) touches front cover's back face
+    backCover.position.set(0, 0, -coverDepth / 2) // Position so front face is at z = 0
+    backCoverRef.current = backCover
+    boxGroup.add(backCover)
+    
+    // Create CD ROM disc (highly reflective, with hole in center)
+    // CD is typically 12cm diameter, but we'll scale it to fit nicely in the box
+    // CD dimensions already defined above (cdOuterRadius, cdInnerRadius, cdThickness)
+    // Use very high segment count for perfectly smooth, mirror-like surface
+    const cdSegments = 256 // Very high number of segments for perfectly smooth circle (mirror quality)
+    
+    // Create CD geometry using a cylinder and subtract the center hole with CSG
+    const cdGeometry = new THREE.CylinderGeometry(cdOuterRadius, cdOuterRadius, cdThickness, cdSegments)
+    
+    // Create hole geometry (slightly taller to ensure clean subtraction, also high segments)
+    const holeGeometry = new THREE.CylinderGeometry(cdInnerRadius, cdInnerRadius, cdThickness + 0.0002, 128)
+    
+    // Use CSG to subtract the hole from the disc
+    const cdBrush = new Brush(cdGeometry)
+    const holeBrush = new Brush(holeGeometry)
+    const evaluator = new Evaluator()
+    const cdResult = evaluator.evaluate(cdBrush, holeBrush, SUBTRACTION)
+    
+    // Ensure geometry is valid and smooth
+    cdResult.geometry.computeVertexNormals()
+    cdResult.geometry.computeBoundingBox()
+    cdResult.geometry.computeBoundingSphere()
+    
+    // Smooth the geometry to remove any faceting
+    // This ensures the surface is perfectly smooth for mirror reflections
+    const smoothGeometry = cdResult.geometry.clone()
+    smoothGeometry.computeVertexNormals()
+    cdResult.geometry = smoothGeometry
+    
+    // Create a rich environment map for mirror-like CD reflections with iridescent colors
+    // Create cube texture with white background and color gradients for rainbow effect
+    const envMapSize = 512 // Higher resolution for better reflections
+    const envMapCanvas = document.createElement('canvas')
+    envMapCanvas.width = envMapSize
+    envMapCanvas.height = envMapSize
+    const envMapContext = envMapCanvas.getContext('2d')
+    
+    // Create gradient from white (center) to colors (edges) for iridescent effect
+    const gradient = envMapContext.createRadialGradient(
+      envMapSize / 2, envMapSize / 2, 0,
+      envMapSize / 2, envMapSize / 2, envMapSize / 2
+    )
+    gradient.addColorStop(0, '#ffffff') // White center (bright reflection)
+    gradient.addColorStop(0.3, '#e0f2ff') // Light blue
+    gradient.addColorStop(0.5, '#d0ffd0') // Light green
+    gradient.addColorStop(0.7, '#fff0d0') // Light yellow/orange
+    gradient.addColorStop(1, '#f0d0ff') // Light purple
+    
+    envMapContext.fillStyle = gradient
+    envMapContext.fillRect(0, 0, envMapSize, envMapSize)
+    
+    const envMapTexture = new THREE.CanvasTexture(envMapCanvas)
+    envMapTexture.mapping = THREE.CubeReflectionMapping
+    envMapTexture.needsUpdate = true
+    
+    // Use MeshPhysicalMaterial for true mirror-like reflections with iridescence
+    const cdMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff, // White base color for bright reflections
+      metalness: 1.0, // Fully metallic for mirror-like surface
+      roughness: 0.0, // Perfectly smooth (zero roughness = mirror)
+      side: THREE.DoubleSide,
+      transparent: true, // Enable transparency for tinted mirror effect
+      opacity: 0.98, // Slightly transparent
+      envMap: envMapTexture, // Use environment map for reflections
+      envMapIntensity: 2.0, // Strong environment reflection
+      iridescence: 1.0, // Full iridescence for rainbow effect (like real CDs)
+      iridescenceIOR: 1.3, // Index of refraction for iridescence
+      iridescenceThicknessRange: [100, 400], // Thickness range for iridescence effect
+      clearcoat: 1.0, // Clear coat layer for extra shine
+      clearcoatRoughness: 0.0, // Perfectly smooth clear coat
+      transmission: 0.1, // Slight transmission for light distortion
+      thickness: 0.0005 // Thin layer for transmission
+    })
+    
+    // Apply material to the CSG result
+    cdResult.material = cdMaterial
+    cdResult.material.needsUpdate = true
+    
+    // Position CD on top of the back cover's front face
+    // The back cover's front face is at z = 0
+    // CD should sit on top of the front face, not inside the hole
+    // Centered horizontally (x = 0) and vertically (y = 0, centered on back cover)
+    // Position it slightly above z = 0 so it sits on top, not overlapping or inside
+    cdResult.position.set(0, 0, cdThickness / 2 + 0.001) // On top of front face (z = 0), slightly above
+    cdResult.rotation.x = Math.PI / 2 // Rotate to lie flat (horizontal)
+    cdResult.visible = false // Hidden initially (only visible when open)
+    cdResult.castShadow = true
+    cdResult.receiveShadow = true
+    cdRomRef.current = cdResult
+    boxGroup.add(cdResult)
+    
+    // Add the entire box group to the scene
+    scene.add(boxGroup)
 
-    // Mouse/touch controls for rotation
+    // Keep reference to front cover mesh (not the group) for texture updates
+    boxMeshRef.current = frontCover
+
+    // Don't start opening animation automatically - wait for click
+    isOpeningRef.current = false
+    openProgressRef.current = 0
+
+        // Load game cover image if available and apply to front cover
+        if (game.image) {
+          const textureLoader = new THREE.TextureLoader()
+          textureLoader.load(
+            game.image,
+            (texture) => {
+              texture.colorSpace = THREE.SRGBColorSpace
+              const maxAnisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 16)
+              texture.anisotropy = maxAnisotropy
+              texture.minFilter = THREE.LinearMipmapLinearFilter
+              texture.magFilter = THREE.LinearFilter
+              texture.generateMipmaps = true
+              
+              frontMaterials[4] = new THREE.MeshStandardMaterial({
+                map: texture,
+                transparent: true,
+                opacity: 0.8, // Slightly more transparent to show blue tint
+                roughness: 0.2,
+                metalness: 0.1,
+                flatShading: false
+              })
+              // Update the mesh material (frontCover is inside the group)
+              frontCover.material = frontMaterials
+            },
+            undefined,
+            (error) => {
+              console.warn('Failed to load game cover:', game.name, error)
+            }
+          )
+        }
+
+    // Mouse/touch controls for rotation and opening
     const handleMouseDown = (e) => {
       e.stopPropagation() // Prevent modal from closing
+      
+      clickStartTimeRef.current = Date.now()
+      clickStartXRef.current = e.clientX || e.touches?.[0]?.clientX || 0
+      clickStartYRef.current = e.clientY || e.touches?.[0]?.clientY || 0
+      
+      // Always allow dragging for rotation
       isDraggingRef.current = true
-      lastMouseXRef.current = e.clientX || e.touches?.[0]?.clientX || 0
-      lastMouseYRef.current = e.clientY || e.touches?.[0]?.clientY || 0
+      lastMouseXRef.current = clickStartXRef.current
+      lastMouseYRef.current = clickStartYRef.current
       if (mountRef.current) {
         mountRef.current.style.cursor = 'grabbing'
       }
@@ -1281,6 +1503,11 @@ function GameDetailModal({ game, onClose }) {
 
     const handleMouseMove = (e) => {
       if (!isDraggingRef.current) return
+      
+      // Don't allow rotation during opening animation
+      if (isOpeningRef.current && openProgressRef.current < 1) {
+        return
+      }
       
       e.preventDefault() // Prevent scrolling on mobile
       e.stopPropagation() // Prevent modal from closing
@@ -1301,10 +1528,35 @@ function GameDetailModal({ game, onClose }) {
       lastMouseYRef.current = eventClientY
     }
 
-    const handleMouseUp = () => {
+    const handleMouseUp = (e) => {
       isDraggingRef.current = false
       if (mountRef.current) {
         mountRef.current.style.cursor = 'grab'
+      }
+      
+      // Check if this was a click (not a drag) - if so, open the box
+      const clickDuration = Date.now() - clickStartTimeRef.current
+      const endX = e?.clientX || e?.changedTouches?.[0]?.clientX || clickStartXRef.current
+      const endY = e?.clientY || e?.changedTouches?.[0]?.clientY || clickStartYRef.current
+      const moveDistance = Math.hypot(endX - clickStartXRef.current, endY - clickStartYRef.current)
+      
+      // If it was a quick click (less than 200ms and moved less than 5px)
+      if (clickDuration < 200 && moveDistance < 5 && !isOpeningRef.current && !isClosingRef.current && !isResettingRef.current) {
+        // If box is open, close it
+        if (openProgressRef.current >= 1) {
+          isClosingRef.current = true
+          openProgressRef.current = 0.99 // Start closing from fully open
+        } 
+        // If box is closed, reset rotation first then open
+        else if (openProgressRef.current === 0) {
+          // Store current rotation for smooth reset
+          initialRotationXRef.current = rotationXRef.current
+          initialRotationYRef.current = rotationYRef.current
+          
+          // Start reset animation
+          isResettingRef.current = true
+          resetProgressRef.current = 0.01
+        }
       }
     }
 
@@ -1331,7 +1583,7 @@ function GameDetailModal({ game, onClose }) {
 
     const handleTouchEnd = (e) => {
       e.stopPropagation() // Prevent modal from closing
-      handleMouseUp()
+      handleMouseUp(e)
       // Reset pinch distance when touch ends
       if (e.touches.length === 0) {
         lastPinchDistanceRef.current = 0
@@ -1419,14 +1671,168 @@ function GameDetailModal({ game, onClose }) {
     renderer.domElement.addEventListener('touchmove', handleTouchMoveZoom)
     renderer.domElement.addEventListener('touchend', handleTouchEnd)
 
-    // Animation loop
-    const animate = () => {
-      requestAnimationFrame(animate)
+    // FPS calculation
+    let fps = 0
+    let frameCount = 0
+    let fpsLastTime = performance.now()
 
-      // Apply rotation to box
-      if (boxMeshRef.current) {
-        boxMeshRef.current.rotation.y = rotationYRef.current
-        boxMeshRef.current.rotation.x = rotationXRef.current
+    // Animation loop
+    const animate = (currentTime) => {
+      requestAnimationFrame(animate)
+      
+      // Calculate FPS
+      frameCount++
+      const fpsDeltaTime = currentTime - fpsLastTime
+      if (fpsDeltaTime >= 1000) {
+        fps = Math.round((frameCount * 1000) / fpsDeltaTime)
+        frameCount = 0
+        fpsLastTime = currentTime
+        
+        // Update FPS counter display
+        if (fpsCounterRef.current) {
+          fpsCounterRef.current.textContent = `${fps} FPS`
+        }
+      }
+
+      // Reset animation - smoothly reset rotation to 0,0,0 before opening
+      if (isResettingRef.current && resetProgressRef.current < 1) {
+        resetProgressRef.current += 0.05 // Reset animation speed
+        if (resetProgressRef.current > 1) {
+          resetProgressRef.current = 1
+        }
+        
+        const resetProgress = resetProgressRef.current
+        // Smoothly interpolate rotation to 0,0,0
+        rotationXRef.current = initialRotationXRef.current * (1 - resetProgress)
+        rotationYRef.current = initialRotationYRef.current * (1 - resetProgress)
+        
+        if (boxGroupRef.current) {
+          boxGroupRef.current.rotation.x = rotationXRef.current
+          boxGroupRef.current.rotation.y = rotationYRef.current
+          boxGroupRef.current.rotation.z = 0
+        }
+        
+        // When reset is complete, start opening animation
+        if (resetProgressRef.current >= 1) {
+          isResettingRef.current = false
+          // Set rotation to opening position
+          rotationXRef.current = 0
+          rotationYRef.current = -22.35 * Math.PI / 180 // -22.35° for opening
+          
+          // Reset covers to initial positions
+          const boxDepth = 0.0264
+          const boxWidth = 0.55
+          const coverDepth = boxDepth / 2
+          if (frontCoverRef.current) {
+            frontCoverRef.current.position.set(-boxWidth / 2, 0, coverDepth / 2)
+            frontCoverRef.current.rotation.set(0, 0, 0)
+          }
+          if (backCoverRef.current) {
+            backCoverRef.current.position.set(0, 0, -coverDepth / 2)
+            backCoverRef.current.rotation.set(0, 0, 0)
+          }
+          
+          // Rotate the entire box to specific rotation when opening
+          if (boxGroupRef.current) {
+            boxGroupRef.current.rotation.x = 0
+            boxGroupRef.current.rotation.y = -22.35 * Math.PI / 180
+            boxGroupRef.current.rotation.z = 0
+          }
+          
+          // Start opening animation
+          isOpeningRef.current = true
+          openProgressRef.current = 0.01
+        }
+      }
+
+      // Closing animation - reverse of opening
+      if (isClosingRef.current && openProgressRef.current > 0) {
+        openProgressRef.current -= 0.03 // Animation speed (same as opening)
+        if (openProgressRef.current < 0) {
+          openProgressRef.current = 0
+          isClosingRef.current = false
+          
+          // Reset rotation to 0 when fully closed
+          rotationXRef.current = 0
+          rotationYRef.current = 0
+          if (boxGroupRef.current) {
+            boxGroupRef.current.rotation.x = 0
+            boxGroupRef.current.rotation.y = 0
+            boxGroupRef.current.rotation.z = 0
+          }
+        }
+        
+        // Animate front cover closing (reverse of opening)
+        const progress = openProgressRef.current
+        
+        if (frontCoverRef.current) {
+          const yRotation = progress * (120 * Math.PI / 180) * -1
+          frontCoverRef.current.rotation.y = yRotation
+          frontCoverRef.current.rotation.x = 0
+          
+          const boxWidth = 0.55
+          const boxDepth = 0.0264
+          const coverDepth = boxDepth / 2
+          frontCoverRef.current.position.set(-boxWidth / 2, 0, coverDepth / 2)
+        }
+        
+        // Hide CD ROM when closing
+        if (cdRomRef.current && openProgressRef.current < 0.5) {
+          cdRomRef.current.visible = false
+        }
+      }
+
+      // Opening animation
+      if (isOpeningRef.current && openProgressRef.current < 1) {
+        openProgressRef.current += 0.03 // Animation speed
+        if (openProgressRef.current > 1) {
+          openProgressRef.current = 1
+          isOpeningRef.current = false
+        }
+        
+        // Animate front cover opening
+        // Rotate 70 degrees on Y axis around the left edge (pivot point)
+        const progress = openProgressRef.current
+        
+        if (frontCoverRef.current) {
+          // Rotate 70 degrees on Y axis around left edge
+          // The group is positioned so its origin is at the left edge
+          // Rotating the group will rotate around the left edge (hinge)
+          const yRotation = progress * (120 * Math.PI / 180) * -1 // 70 degrees on Y
+          
+          // Apply rotation to the group (which rotates around its origin = left edge)
+          frontCoverRef.current.rotation.y = yRotation
+          frontCoverRef.current.rotation.x = 0 // Keep X rotation at 0
+          
+          // Keep the group position fixed at the left edge (hinge point stays in place)
+          // This ensures the left edge of front cover always touches left edge of back cover
+          const boxWidth = 0.55
+          const boxDepth = 0.0264
+          const coverDepth = boxDepth / 2
+          frontCoverRef.current.position.set(-boxWidth / 2, 0, coverDepth / 2)
+        }
+        
+        // Show CD ROM when opening (after 50% progress)
+        if (cdRomRef.current && openProgressRef.current > 0.5) {
+          cdRomRef.current.visible = true
+        }
+      }
+
+      // Apply rotation to the entire box (both covers together) around its center
+      // Only when not opening and box is closed or fully open
+      if (!isOpeningRef.current && boxGroupRef.current && (openProgressRef.current === 0 || openProgressRef.current >= 1)) {
+        // Rotate the parent box group around its center (0, 0, 0)
+        // When fully open, preserve the opening rotation and allow user to modify it
+        boxGroupRef.current.rotation.y = rotationYRef.current
+        boxGroupRef.current.rotation.x = rotationXRef.current
+        boxGroupRef.current.rotation.z = 0 // Keep Z at 0
+        
+        // Log rotation values
+        console.log('Game box rotation:', {
+          x: (rotationXRef.current * 180 / Math.PI).toFixed(2) + '°',
+          y: (rotationYRef.current * 180 / Math.PI).toFixed(2) + '°',
+          z: (boxGroupRef.current.rotation.z * 180 / Math.PI).toFixed(2) + '°'
+        })
       }
 
       // Apply zoom to camera - smooth interpolation
@@ -1482,6 +1888,13 @@ function GameDetailModal({ game, onClose }) {
           }
         }
       })
+
+      // Reset refs
+      frontCoverRef.current = null
+      backCoverRef.current = null
+      cdRomRef.current = null
+      boxGroupRef.current = null
+      boxMeshRef.current = null
 
       renderer.dispose()
     }
