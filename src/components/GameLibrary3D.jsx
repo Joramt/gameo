@@ -46,19 +46,30 @@ function GameLibrary3D({ games = [] }) {
     camera.lookAt(0, 3, 0) // Look at center of tall wall
     cameraRef.current = camera
 
-    // Renderer setup with adaptive quality for mobile
+    // Renderer setup with optimized quality settings
     const renderer = new THREE.WebGLRenderer({ 
-      antialias: !isMobile, // Disable antialiasing on mobile for performance
+      antialias: true, // Enable MSAA for smooth edges (more efficient than FXAA)
       alpha: false,
-      powerPreference: "high-performance"
+      powerPreference: "high-performance",
+      stencil: false, // Disable stencil buffer to save memory
+      depth: true
     })
     renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight)
-    // Lower pixel ratio on mobile for better performance
-    renderer.setPixelRatio(isMobile ? Math.min(window.devicePixelRatio, 1) : Math.min(window.devicePixelRatio, 2))
-    renderer.shadowMap.enabled = !isMobile // Disable shadows on mobile
-    renderer.shadowMap.type = isMobile ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap
+    // Adaptive pixel ratio - slightly higher on desktop for crisp visuals, lower on mobile
+    renderer.setPixelRatio(isMobile ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 2))
+    
+    // Enable shadows with optimized settings
+    renderer.shadowMap.enabled = true
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap // Soft shadows for realistic look
+    renderer.shadowMap.autoUpdate = true
+    
+    // Tone mapping for realistic colors
     renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.2 // Slightly brighter
+    renderer.toneMappingExposure = 1.2
+    
+    // Enable output encoding for better color accuracy
+    renderer.outputColorSpace = THREE.SRGBColorSpace
+    
     mountRef.current.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
@@ -70,20 +81,19 @@ function GameLibrary3D({ games = [] }) {
     // Main directional light from window (top, slanted ceiling area)
     const mainLight = new THREE.DirectionalLight(0xb3d9ff, isMobile ? 1.2 : 1.5) // Slightly dimmer on mobile
     mainLight.position.set(0, 12, 2) // Above, coming from window area
-    if (!isMobile) {
-      mainLight.castShadow = true
-      mainLight.shadow.mapSize.width = 2048 // Reduced from 4096 for better performance
-      mainLight.shadow.mapSize.height = 2048
-      mainLight.shadow.camera.near = 0.5
-      mainLight.shadow.camera.far = 25
-      mainLight.shadow.camera.left = -10
-      mainLight.shadow.camera.right = 10
-      mainLight.shadow.camera.top = 8
-      mainLight.shadow.camera.bottom = -3
-      mainLight.shadow.bias = -0.0005
-      mainLight.shadow.normalBias = 0.02
-      mainLight.shadow.radius = 4 // Reduced from 8 for better performance
-    }
+    mainLight.castShadow = true
+    // Optimized shadow map size - balance between quality and memory
+    mainLight.shadow.mapSize.width = isMobile ? 1024 : 2048
+    mainLight.shadow.mapSize.height = isMobile ? 1024 : 2048
+    mainLight.shadow.camera.near = 0.5
+    mainLight.shadow.camera.far = 25
+    mainLight.shadow.camera.left = -10
+    mainLight.shadow.camera.right = 10
+    mainLight.shadow.camera.top = 8
+    mainLight.shadow.camera.bottom = -3
+    mainLight.shadow.bias = -0.0005
+    mainLight.shadow.normalBias = 0.02
+    mainLight.shadow.radius = isMobile ? 2 : 4 // Softer shadows for realistic look
     scene.add(mainLight)
 
     // Additional fill light to ensure well-lit room (only on desktop)
@@ -104,6 +114,17 @@ function GameLibrary3D({ games = [] }) {
     // Floor - dark chestnut hardwood
     const floorTexture = createChestnutHardwoodTexture()
     const floorNormalMap = createHardwoodNormalMap()
+    
+    // Optimize texture settings for quality
+    floorTexture.colorSpace = THREE.SRGBColorSpace
+    floorTexture.anisotropy = renderer.capabilities.getMaxAnisotropy() // Maximum anisotropic filtering for crisp textures
+    floorTexture.minFilter = THREE.LinearMipmapLinearFilter
+    floorTexture.magFilter = THREE.LinearFilter
+    
+    floorNormalMap.anisotropy = renderer.capabilities.getMaxAnisotropy()
+    floorNormalMap.minFilter = THREE.LinearMipmapLinearFilter
+    floorNormalMap.magFilter = THREE.LinearFilter
+    
     const floorMaterial = new THREE.MeshStandardMaterial({
       map: floorTexture,
       normalMap: floorNormalMap,
@@ -156,11 +177,12 @@ function GameLibrary3D({ games = [] }) {
     rightBaseboard.receiveShadow = true
     scene.add(rightBaseboard)
 
-    // Walls - creamy white
+    // Walls - creamy white with smooth appearance
     const wallMaterial = new THREE.MeshStandardMaterial({
       color: "#fffbf6", // Creamy white (same as ceiling)
       roughness: 0.6,
-      metalness: 0.0
+      metalness: 0.0,
+      flatShading: false // Smooth shading for realistic appearance
     })
 
     // Back wall - simple test: 1 wall with 1 square hole in center
@@ -502,11 +524,12 @@ function GameLibrary3D({ games = [] }) {
     console.log('Total hole meshes created:', holeMeshesRef.current.length)
 
     // Add wooden ledges at the bottom of each hole
-    // Use light IKEA-style brown
+    // Use light IKEA-style brown with smooth appearance
     const ledgeMaterial = new THREE.MeshStandardMaterial({
       color: 0xd4a574, // Light IKEA brown (beige/tan wood color)
       roughness: 0.7,
-      metalness: 0.0
+      metalness: 0.0,
+      flatShading: false // Smooth shading for realistic appearance
     })
     
     holes.forEach((hole) => {
@@ -593,24 +616,25 @@ function GameLibrary3D({ games = [] }) {
         boxesPerHole[holeIndex]++
         
         // Create PS5-style game box
-        // Reduce segments on mobile for better performance
+        // Balance between quality and performance for smooth edges
         const boxGeometry = new RoundedBoxGeometry(
           boxWidth,
           boxHeight,
           boxDepth,
-          isMobile ? 1 : 2, // Fewer segments on mobile
+          isMobile ? 2 : 3, // More segments for smoother rounded corners
           0.005 // small corner radius
         )
         
         // Create materials array for different faces
         // Face order: right, left, top, bottom, front, back
-        // PS5 translucent blue material
+        // PS5 translucent blue material with smooth appearance
         const ps5MaterialProps = {
           color: ps5Blue,
           transparent: true,
           opacity: 0.85, // Translucent like PS5 cases
           roughness: 0.2,
-          metalness: 0.1
+          metalness: 0.1,
+          flatShading: false // Smooth shading for realistic appearance
         }
         
         const materials = [
@@ -636,20 +660,26 @@ function GameLibrary3D({ games = [] }) {
           textureLoader.load(
             game.image,
             (texture) => {
-              // Reduce texture quality on mobile for better performance
-              if (isMobile) {
-                // Use lower quality texture filtering on mobile
-                texture.minFilter = THREE.LinearFilter
-                texture.magFilter = THREE.LinearFilter
-                texture.generateMipmaps = false
-              }
+              // Optimize texture settings for high quality with efficient memory usage
+              texture.colorSpace = THREE.SRGBColorSpace
+              
+              // Use anisotropic filtering for crisp textures (capped for memory efficiency)
+              const maxAnisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), isMobile ? 4 : 16)
+              texture.anisotropy = maxAnisotropy
+              
+              // High quality filtering with mipmaps
+              texture.minFilter = THREE.LinearMipmapLinearFilter
+              texture.magFilter = THREE.LinearFilter
+              texture.generateMipmaps = true
+              
               // Update the front face material (index 4) with the cover image
               materials[4] = new THREE.MeshStandardMaterial({
                 map: texture,
                 transparent: true,
                 opacity: 0.9,
                 roughness: 0.2,
-                metalness: 0.1
+                metalness: 0.1,
+                flatShading: false // Smooth shading for realistic appearance
               })
               boxMesh.material = materials // Update materials array
             },
@@ -1102,8 +1132,11 @@ function createChestnutHardwoodTexture() {
   texture.wrapS = THREE.RepeatWrapping
   texture.wrapT = THREE.RepeatWrapping
   texture.repeat.set(6, 3)
-  texture.anisotropy = 16
-
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.anisotropy = 16 // High quality anisotropic filtering
+  texture.minFilter = THREE.LinearMipmapLinearFilter
+  texture.magFilter = THREE.LinearFilter
+  texture.generateMipmaps = true
   return texture
 }
 
@@ -1172,7 +1205,11 @@ function createSkyTexture() {
   const texture = new THREE.CanvasTexture(canvas)
   texture.wrapS = THREE.RepeatWrapping
   texture.wrapT = THREE.ClampToEdgeWrapping
-
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.anisotropy = 16 // High quality anisotropic filtering
+  texture.minFilter = THREE.LinearMipmapLinearFilter
+  texture.magFilter = THREE.LinearFilter
+  texture.generateMipmaps = true
   return texture
 }
 
@@ -1234,7 +1271,11 @@ function createStoneTexture() {
   texture.wrapS = THREE.RepeatWrapping
   texture.wrapT = THREE.RepeatWrapping
   texture.repeat.set(1, 1)
-
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.anisotropy = 16 // High quality anisotropic filtering
+  texture.minFilter = THREE.LinearMipmapLinearFilter
+  texture.magFilter = THREE.LinearFilter
+  texture.generateMipmaps = true
   return texture
 }
 
