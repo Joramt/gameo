@@ -14,8 +14,12 @@ function GameLibrary3D({ games = [] }) {
   const lastMouseXRef = useRef(0)
   const lastMouseYRef = useRef(0)
   const gameBoxesRef = useRef([]) // Store references to game boxes for interaction
+  const boxEdgesRef = useRef([]) // Store references to edge highlights
+  const holeMeshesRef = useRef([]) // Store references to hole meshes for click/hover detection
+  const holeEdgesRef = useRef([]) // Store references to hole edge highlights
   const raycasterRef = useRef(new THREE.Raycaster())
   const mouseRef = useRef(new THREE.Vector2())
+  const hoveredHoleRef = useRef(null) // Currently hovered hole
 
   useEffect(() => {
     if (!mountRef.current) return
@@ -281,56 +285,100 @@ function GameLibrary3D({ games = [] }) {
     const minSpacing = 0.3 // Minimum spacing between boxes
     
     // Array of holes: { x, y, width, height }
-    // Heights vary between 0.85 and 1.15
-    // All holes positioned at least 2 box heights from ground
+    // Max 4 holes per row, ensure they're not too close to edges
+    // Wall width is 12, so keep holes within -5.5 to 5.5 (with margin)
     const holes = [
-      // Bottom row (around y = 2.5-3.5)
-      { x: -5, y: 2.8, width: 1.4, height: 0.95 },
-      { x: -3, y: 3.2, width: 1.9, height: 1.1 },
-      { x: -0.5, y: 2.6, width: 2.1, height: 0.9 },
-      { x: 2, y: 3.0, width: 1.7, height: 1.05 },
-      { x: 4.5, y: 2.9, width: 1.5, height: 0.88 },
+      // Row 1 (around y = 2.5-3.5) - max 4 holes
+      { x: -4.5, y: 2.8, width: 1.8, height: 0.95 },
+      { x: -1.5, y: 3.0, width: 1.9, height: 1.1 },
+      { x: 1.5, y: 2.9, width: 1.7, height: 1.05 },
+      { x: 4.2, y: 3.1, width: 1.6, height: 0.92 },
       
-      // Middle row (around y = 4-5.5)
-      { x: -4.5, y: 4.3, width: 1.8, height: 1.12 },
-      { x: -2, y: 4.8, width: 2.0, height: 0.92 },
-      { x: 0.5, y: 4.5, width: 1.6, height: 1.08 },
-      { x: 3, y: 4.7, width: 1.9, height: 0.96 },
-      { x: 5, y: 4.2, width: 1.3, height: 1.15 },
+      // Row 2 (around y = 4-5) - max 4 holes
+      { x: -4.2, y: 4.3, width: 1.8, height: 1.12 },
+      { x: -1.2, y: 4.5, width: 2.0, height: 0.96 },
+      { x: 1.8, y: 4.4, width: 1.6, height: 1.08 },
+      { x: 4.5, y: 4.6, width: 1.5, height: 0.94 },
       
-      // Upper middle row (around y = 5.5-7)
-      { x: -3.5, y: 6.0, width: 2.2, height: 1.02 },
-      { x: -1, y: 6.5, width: 1.7, height: 0.94 },
-      { x: 1.5, y: 6.2, width: 1.8, height: 1.06 },
-      { x: 4, y: 6.8, width: 1.6, height: 0.98 },
+      // Row 3 (around y = 5.5-6.5) - max 4 holes
+      { x: -4.5, y: 6.0, width: 1.9, height: 1.02 },
+      { x: -1.5, y: 6.2, width: 1.7, height: 0.98 },
+      { x: 1.5, y: 6.1, width: 1.8, height: 1.06 },
+      { x: 4.2, y: 6.3, width: 1.6, height: 0.99 },
       
-      // Top row (around y = 7.5-8.5)
-      { x: -4, y: 7.8, width: 1.9, height: 1.09 },
-      { x: -1.5, y: 8.2, width: 2.1, height: 0.91 },
-      { x: 1, y: 7.6, width: 1.5, height: 1.13 },
-      { x: 3.5, y: 8.0, width: 1.8, height: 0.97 },
-      { x: 5.2, y: 7.9, width: 1.4, height: 1.04 },
+      // Row 4 (around y = 7-8) - max 4 holes
+      { x: -4.2, y: 7.5, width: 1.9, height: 1.09 },
+      { x: -1.2, y: 7.7, width: 2.0, height: 0.91 },
+      { x: 1.8, y: 7.6, width: 1.5, height: 1.13 },
+      { x: 4.5, y: 7.8, width: 1.7, height: 0.97 },
     ]
     
-    // Ensure minimum spacing between boxes
-    // Sort holes by Y position and adjust if too close
-    const sortedHoles = [...holes].sort((a, b) => a.y - b.y)
-    for (let i = 1; i < sortedHoles.length; i++) {
-      const prev = sortedHoles[i - 1]
-      const curr = sortedHoles[i]
-      const prevBottom = prev.y - prev.height / 2
-      const currTop = curr.y + curr.height / 2
-      const spacing = currTop - prevBottom
-      
-      if (spacing < minSpacing) {
-        // Move current hole up to maintain minimum spacing
-        const neededY = prevBottom + prev.height / 2 + minSpacing + curr.height / 2
-        curr.y = neededY
-        // Update original array
-        const originalIndex = holes.findIndex(h => h.x === curr.x && h.width === curr.width)
-        if (originalIndex !== -1) {
-          holes[originalIndex].y = neededY
+    // Ensure minimum spacing between holes (0.3 units minimum) and prevent edge clipping
+    // Wall width is 12, so keep holes within safe bounds (-5.5 to 5.5)
+    const wallLeftEdge = -wallWidth / 2
+    const wallRightEdge = wallWidth / 2
+    const safeMargin = 0.5 // Safe margin from wall edges
+    
+    for (let i = 0; i < holes.length; i++) {
+      for (let j = i + 1; j < holes.length; j++) {
+        const hole1 = holes[i]
+        const hole2 = holes[j]
+        
+        // Calculate bounding boxes
+        const hole1Left = hole1.x - hole1.width / 2
+        const hole1Right = hole1.x + hole1.width / 2
+        const hole1Bottom = hole1.y - hole1.height / 2
+        const hole1Top = hole1.y + hole1.height / 2
+        
+        const hole2Left = hole2.x - hole2.width / 2
+        const hole2Right = hole2.x + hole2.width / 2
+        const hole2Bottom = hole2.y - hole2.height / 2
+        const hole2Top = hole2.y + hole2.height / 2
+        
+        // Calculate horizontal distance
+        const horizontalDist = Math.max(
+          hole1Left - hole2Right, // hole1 is to the left
+          hole2Left - hole1Right  // hole2 is to the left
+        )
+        
+        // Calculate vertical distance
+        const verticalDist = Math.max(
+          hole1Bottom - hole2Top, // hole1 is below
+          hole2Bottom - hole1Top  // hole2 is below
+        )
+        
+        // If holes overlap or are too close, adjust position
+        if (horizontalDist < minSpacing && verticalDist < minSpacing) {
+          // Holes are too close - move hole2
+          if (horizontalDist < minSpacing) {
+            // Adjust X position
+            if (hole1.x < hole2.x) {
+              hole2.x = hole1Right + minSpacing + hole2.width / 2
+            } else {
+              hole2.x = hole1Left - minSpacing - hole2.width / 2
+            }
+          }
+          if (verticalDist < minSpacing) {
+            // Adjust Y position
+            if (hole1.y < hole2.y) {
+              hole2.y = hole1Top + minSpacing + hole2.height / 2
+            } else {
+              hole2.y = hole1Bottom - minSpacing - hole2.height / 2
+            }
+          }
         }
+      }
+      
+      // Ensure hole doesn't go beyond wall edges
+      const hole = holes[i]
+      const holeLeft = hole.x - hole.width / 2
+      const holeRight = hole.x + hole.width / 2
+      
+      if (holeLeft < wallLeftEdge + safeMargin) {
+        hole.x = wallLeftEdge + safeMargin + hole.width / 2
+      }
+      if (holeRight > wallRightEdge - safeMargin) {
+        hole.x = wallRightEdge - safeMargin - hole.width / 2
       }
     }
     
@@ -399,6 +447,47 @@ function GameLibrary3D({ games = [] }) {
     scene.add(backWall)
     console.log('Wall added to scene, visible:', backWall.visible, 'position:', backWall.position)
 
+    // Create clickable/hoverable meshes for each hole
+    holeMeshesRef.current = []
+    holeEdgesRef.current = []
+    
+    holes.forEach((hole) => {
+      // Create an invisible plane for click/hover detection
+      // PlaneGeometry by default faces the +Z direction, which is correct for our wall
+      const holePlaneGeometry = new THREE.PlaneGeometry(hole.width, hole.height)
+      const holePlaneMaterial = new THREE.MeshBasicMaterial({
+        visible: false, // Invisible but still clickable
+        side: THREE.DoubleSide // Double-sided to catch rays from both directions
+      })
+      const holePlane = new THREE.Mesh(holePlaneGeometry, holePlaneMaterial)
+      // Position at the front face of the wall (where holes are visible)
+      // Camera is at z=0 looking toward negative Z, so planes need to face negative Z
+      holePlane.position.set(hole.x, hole.y, wallFrontZ + 0.1) // Forward from wall surface
+      holePlane.rotation.y = Math.PI // Rotate 180 degrees to face the camera (negative Z direction)
+      holePlane.userData.hole = hole // Store hole data
+      holePlane.userData.isHole = true // Mark as hole for debugging
+      scene.add(holePlane)
+      holeMeshesRef.current.push(holePlane)
+      
+      console.log('Created hole mesh for hole at:', hole.x, hole.y, 'width:', hole.width, 'height:', hole.height, 'z:', wallFrontZ + 0.1)
+      
+      // Create edge highlight for hover effect
+      const holeEdgesGeometry = new THREE.EdgesGeometry(new THREE.PlaneGeometry(hole.width, hole.height))
+      const holeEdgesMaterial = new THREE.LineBasicMaterial({
+        color: 0x00ff00, // Green highlight
+        linewidth: 3,
+        visible: false // Hidden by default, shown on hover
+      })
+      const holeEdges = new THREE.LineSegments(holeEdgesGeometry, holeEdgesMaterial)
+      holeEdges.position.copy(holePlane.position)
+      holeEdges.rotation.copy(holePlane.rotation) // Same rotation as plane
+      holeEdges.userData.hole = hole
+      scene.add(holeEdges)
+      holeEdgesRef.current.push(holeEdges)
+    })
+    
+    console.log('Total hole meshes created:', holeMeshesRef.current.length)
+
     // Add wooden ledges at the bottom of each hole
     // Use light IKEA-style brown
     const ledgeMaterial = new THREE.MeshStandardMaterial({
@@ -436,46 +525,20 @@ function GameLibrary3D({ games = [] }) {
     // Create PS5-style game boxes and place them on shelves
     if (games && games.length > 0) {
       const ps5Blue = 0x003087 // PS5 blue color
-      // Make boxes 3x taller - but still smaller than holes in height
-      const boxWidth = 0.18 // Width of game box (wider)
-      const boxHeight = 0.84 // Height of game box (3x taller: 0.28 * 3 = 0.84)
-      const boxDepth = 0.015 // Depth (thickness) of game box (thicker)
-      const boxSpacing = 0.15 // Spacing between boxes (increased significantly to prevent ledge clipping)
-      const boxPadding = 0.15 // Padding from hole edges (increased to prevent clipping and add space)
-      const topPadding = 0.15 // Extra padding at the top of each hole
+      // PS5 game box dimensions - 2.2x bigger on every axis
+      const boxWidth = 0.55 // Width of game box (0.25 * 2.2)
+      const boxHeight = 0.77 // Height of game box (0.35 * 2.2)
+      const boxDepth = 0.0264 // Depth (thickness) of game box (0.012 * 2.2)
+      // Boxes need spacing between them, not padding from edges
+      const boxSpacing = 0.25 // Spacing between boxes (increased significantly to prevent ledge clipping)
+      const boxPadding = 0.05 // Minimal padding from hole edges (just to prevent touching)
+      const topPadding = 0.05 // Minimal padding at the top
       const ledgeProtrusion = 0.08 // How much the ledge protrudes (needed for spacing calculation)
       
-      // Helper function to create text texture for game name
-      const createTextTexture = (text, width = 512, height = 128) => {
-        const canvas = document.createElement('canvas')
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext('2d')
-        
-        // Background
-        ctx.fillStyle = ps5Blue
-        ctx.fillRect(0, 0, width, height)
-        
-        // Text styling
-        ctx.fillStyle = '#ffffff'
-        ctx.font = 'bold 48px Arial'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        
-        // Draw text (rotated 90 degrees for vertical text on edge)
-        ctx.save()
-        ctx.translate(width / 2, height / 2)
-        ctx.rotate(-Math.PI / 2) // Rotate text to be vertical
-        ctx.fillText(text, 0, 0)
-        ctx.restore()
-        
-        const texture = new THREE.CanvasTexture(canvas)
-        texture.needsUpdate = true
-        return texture
-      }
       
       // Store boxes for interaction
       gameBoxesRef.current = []
+      boxEdgesRef.current = [] // Initialize edge highlights array
       
       // Track how many boxes are in each hole
       const boxesPerHole = Array(holes.length).fill(0)
@@ -504,11 +567,11 @@ function GameLibrary3D({ games = [] }) {
         // Add extra vertical spacing to account for ledge protrusion
         const ledgeTopY = hole.y - hole.height / 2 + 0.05 // Top of the ledge (ledge thickness is 0.05)
         const verticalSpacing = boxHeight + boxSpacing // Ensure enough space between boxes
-        const boxY = ledgeTopY + boxHeight / 2 + (rowIndex * verticalSpacing)
+        const boxYPosition = ledgeTopY + boxHeight / 2 + (rowIndex * verticalSpacing)
         
         // Make sure box fits within hole height (accounting for ledge, padding, and top spacing)
         const maxY = hole.y + (hole.height / 2) - boxPadding - topPadding
-        if (boxY + (boxHeight / 2) > maxY) {
+        if (boxYPosition + (boxHeight / 2) > maxY) {
           return // Skip if box doesn't fit
         }
         
@@ -524,63 +587,46 @@ function GameLibrary3D({ games = [] }) {
           0.005 // small corner radius
         )
         
-        // Create text texture for the edge (spine)
-        const textTexture = createTextTexture(game.name || 'Game', 512, 128)
-        
         // Create materials array for different faces
         // Face order: right, left, top, bottom, front, back
-        // After 90° X rotation: right=edge (text), left=hidden, top=front (cover), bottom=back, front=top, back=bottom
+        // PS5 translucent blue material
+        const ps5MaterialProps = {
+          color: ps5Blue,
+          transparent: true,
+          opacity: 0.85, // Translucent like PS5 cases
+          roughness: 0.2,
+          metalness: 0.1
+        }
+        
         const materials = [
-          // Right face - visible edge with game name text
-          new THREE.MeshStandardMaterial({
-            map: textTexture,
-            roughness: 0.3,
-            metalness: 0.1
-          }),
-          // Left face - hidden edge
-          new THREE.MeshStandardMaterial({
-            color: ps5Blue,
-            roughness: 0.3,
-            metalness: 0.1
-          }),
-          // Top face - will be front after rotation (game cover)
-          new THREE.MeshStandardMaterial({
-            color: ps5Blue,
-            roughness: 0.3,
-            metalness: 0.1
-          }),
-          // Bottom face - will be back after rotation
-          new THREE.MeshStandardMaterial({
-            color: ps5Blue,
-            roughness: 0.3,
-            metalness: 0.1
-          }),
-          // Front face - will be top after rotation
-          new THREE.MeshStandardMaterial({
-            color: ps5Blue,
-            roughness: 0.3,
-            metalness: 0.1
-          }),
-          // Back face - will be bottom after rotation
-          new THREE.MeshStandardMaterial({
-            color: ps5Blue,
-            roughness: 0.3,
-            metalness: 0.1
-          })
+          // Right face - side edge
+          new THREE.MeshStandardMaterial(ps5MaterialProps),
+          // Left face - side edge
+          new THREE.MeshStandardMaterial(ps5MaterialProps),
+          // Top face
+          new THREE.MeshStandardMaterial(ps5MaterialProps),
+          // Bottom face
+          new THREE.MeshStandardMaterial(ps5MaterialProps),
+          // Front face - game cover goes here
+          new THREE.MeshStandardMaterial(ps5MaterialProps),
+          // Back face
+          new THREE.MeshStandardMaterial(ps5MaterialProps)
         ]
         
         const boxMesh = new THREE.Mesh(boxGeometry, materials)
         
-        // Load game cover image if available and apply to top face (front after rotation)
+        // Load game cover image if available and apply to front face (index 4)
         if (game.image) {
           const textureLoader = new THREE.TextureLoader()
           textureLoader.load(
             game.image,
             (texture) => {
-              // Update the top face material (index 2) with the cover image
-              materials[2] = new THREE.MeshStandardMaterial({
+              // Update the front face material (index 4) with the cover image
+              materials[4] = new THREE.MeshStandardMaterial({
                 map: texture,
-                roughness: 0.3,
+                transparent: true,
+                opacity: 0.9,
+                roughness: 0.2,
                 metalness: 0.1
               })
               boxMesh.material = materials // Update materials array
@@ -592,17 +638,22 @@ function GameLibrary3D({ games = [] }) {
           )
         }
         
-        // Position box on the ledge
+        // Position box on the ledge - front face should be visible
+        // Box stands upright with front face showing (no rotation needed)
         boxMesh.position.set(
           boxX,
-          boxY,
-          wallFrontZ + holeDepth / 2 + boxDepth / 2 + 0.01 // Slightly forward from the back of the hole
+          boxYPosition,
+          wallFrontZ + holeDepth / 2 + boxDepth / 2 + 0.01 // Position forward from back of hole
         )
         
-        // Rotate box 90 degrees on X axis to expose the edge
-        boxMesh.rotation.x = Math.PI / 2 // 90 degrees
+        // No rotation - box stands normally with front face visible
+        boxMesh.rotation.x = 0
         boxMesh.rotation.y = 0
         boxMesh.rotation.z = 0
+        
+        // Make sure box is visible
+        boxMesh.visible = true
+        boxMesh.updateMatrixWorld()
         
         boxMesh.castShadow = true
         boxMesh.receiveShadow = true
@@ -615,45 +666,29 @@ function GameLibrary3D({ games = [] }) {
           currentRotationX: 0
         }
         
-        // Add to scene and store reference
+        // Create edge highlight for hover effect
+        const edgesGeometry = new THREE.EdgesGeometry(boxGeometry)
+        const edgesMaterial = new THREE.LineBasicMaterial({
+          color: 0xffffff,
+          linewidth: 2,
+          visible: false // Hidden by default, shown on hover
+        })
+        const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial)
+        edges.position.copy(boxMesh.position)
+        edges.rotation.copy(boxMesh.rotation)
+        edges.userData.boxMesh = boxMesh // Link to parent box
+        
+        // Add to scene and store references
         scene.add(boxMesh)
+        scene.add(edges)
         gameBoxesRef.current.push(boxMesh)
+        boxEdgesRef.current.push(edges)
       })
     }
 
     // Mouse controls for horizontal and vertical rotation
     const handleMouseDown = (e) => {
-      // First check if clicking on a game box
-      if (gameBoxesRef.current.length > 0 && rendererRef.current && cameraRef.current) {
-        // Calculate mouse position in normalized device coordinates
-        mouseRef.current.x = (e.clientX / rendererRef.current.domElement.clientWidth) * 2 - 1
-        mouseRef.current.y = -(e.clientY / rendererRef.current.domElement.clientHeight) * 2 + 1
-        
-        // Update raycaster
-        raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current)
-        
-        // Check for intersections with game boxes
-        const intersects = raycasterRef.current.intersectObjects(gameBoxesRef.current)
-        
-        if (intersects.length > 0) {
-          // Clicked on a game box - rotate it on X axis
-          const clickedBox = intersects[0].object
-          const userData = clickedBox.userData
-          
-          // Toggle rotation: if currently at 0, rotate to 45 degrees, otherwise rotate back to 0
-          if (userData.targetRotationX === 0) {
-            userData.targetRotationX = Math.PI / 4 // 45 degrees
-            userData.isRotating = true
-          } else {
-            userData.targetRotationX = 0
-            userData.isRotating = true
-          }
-          
-          return // Don't start camera dragging
-        }
-      }
-      
-      // No box clicked, start camera dragging
+      // Start camera dragging
       isDraggingRef.current = true
       lastMouseXRef.current = e.clientX
       lastMouseYRef.current = e.clientY
@@ -663,6 +698,73 @@ function GameLibrary3D({ games = [] }) {
     }
 
     const handleMouseMove = (e) => {
+      // Only process hover if mouse is over the canvas
+      const rect = rendererRef.current?.domElement.getBoundingClientRect()
+      if (!rect) return
+      
+      const mouseX = e.clientX - rect.left
+      const mouseY = e.clientY - rect.top
+      
+      // Check if mouse is within canvas bounds
+      if (mouseX < 0 || mouseX > rect.width || mouseY < 0 || mouseY > rect.height) {
+        // Mouse is outside canvas - hide highlights
+        if (hoveredHoleRef.current) {
+          hoveredHoleRef.current = null
+          holeEdgesRef.current.forEach(edge => edge.visible = false)
+          if (mountRef.current && !isDraggingRef.current) {
+            mountRef.current.style.cursor = 'grab'
+          }
+        }
+        if (!isDraggingRef.current) return
+      }
+      
+      // Check for hover on holes (even when not dragging)
+      if (holeMeshesRef.current.length > 0 && rendererRef.current && cameraRef.current) {
+        // Calculate mouse position in normalized device coordinates relative to canvas
+        mouseRef.current.x = (mouseX / rect.width) * 2 - 1
+        mouseRef.current.y = -(mouseY / rect.height) * 2 + 1
+        
+        // Update raycaster
+        raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current)
+        
+        // Check for intersections with hole meshes
+        const intersects = raycasterRef.current.intersectObjects(holeMeshesRef.current, false)
+        
+        // Hide all hole edge highlights first
+        holeEdgesRef.current.forEach(edge => {
+          edge.visible = false
+        })
+        
+        if (intersects.length > 0) {
+          // Hovering over a hole - show edge highlight
+          const hoveredHoleMesh = intersects[0].object
+          const hoveredHole = hoveredHoleMesh.userData.hole
+          hoveredHoleRef.current = hoveredHoleMesh
+          
+          console.log('Hovering over hole at:', hoveredHole.x, hoveredHole.y, 'distance:', intersects[0].distance)
+          
+          // Find and show the corresponding edge highlight
+          const edgeHighlight = holeEdgesRef.current.find(edge => edge.userData.hole === hoveredHole)
+          if (edgeHighlight) {
+            edgeHighlight.visible = true
+          }
+          
+          // Change cursor to pointer
+          if (mountRef.current && !isDraggingRef.current) {
+            mountRef.current.style.cursor = 'pointer'
+          }
+        } else {
+          // Not hovering over any hole
+          if (hoveredHoleRef.current) {
+            console.log('Stopped hovering over hole')
+            hoveredHoleRef.current = null
+          }
+          if (mountRef.current && !isDraggingRef.current) {
+            mountRef.current.style.cursor = 'grab'
+          }
+        }
+      }
+      
       if (!isDraggingRef.current) return
       
       const deltaX = e.clientX - lastMouseXRef.current
@@ -723,9 +825,22 @@ function GameLibrary3D({ games = [] }) {
       }
     }
 
+    // Attach events only to the canvas element, not the window
+    const handleMouseLeave = () => {
+      // Hide highlights when mouse leaves canvas
+      if (hoveredHoleRef.current) {
+        hoveredHoleRef.current = null
+        holeEdgesRef.current.forEach(edge => edge.visible = false)
+        if (mountRef.current) {
+          mountRef.current.style.cursor = 'grab'
+        }
+      }
+    }
+    
     renderer.domElement.addEventListener('mousedown', handleMouseDown)
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
+    renderer.domElement.addEventListener('mousemove', handleMouseMove)
+    renderer.domElement.addEventListener('mouseup', handleMouseUp)
+    renderer.domElement.addEventListener('mouseleave', handleMouseLeave)
     renderer.domElement.addEventListener('touchstart', handleTouchStart)
     renderer.domElement.addEventListener('touchmove', handleTouchMove)
     renderer.domElement.addEventListener('touchend', handleTouchEnd)
@@ -734,6 +849,14 @@ function GameLibrary3D({ games = [] }) {
     const animate = () => {
       requestAnimationFrame(animate)
 
+      // Update hole edge highlights to follow their hole meshes
+      holeEdgesRef.current.forEach(edge => {
+        if (edge.userData.hole) {
+          const hole = edge.userData.hole
+          edge.position.set(hole.x, hole.y, wallFrontZ + 0.01)
+        }
+      })
+      
       // Update camera rotation (horizontal and vertical)
       const radius = 0.05 // Very close to wall, minimal movement
       const baseCameraY = 2 // Base height
@@ -773,8 +896,9 @@ function GameLibrary3D({ games = [] }) {
     return () => {
       window.removeEventListener('resize', handleResize)
       renderer.domElement.removeEventListener('mousedown', handleMouseDown)
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
+      renderer.domElement.removeEventListener('mousemove', handleMouseMove)
+      renderer.domElement.removeEventListener('mouseup', handleMouseUp)
+      renderer.domElement.removeEventListener('mouseleave', handleMouseLeave)
       renderer.domElement.removeEventListener('touchstart', handleTouchStart)
       renderer.domElement.removeEventListener('touchmove', handleTouchMove)
       renderer.domElement.removeEventListener('touchend', handleTouchEnd)
@@ -785,7 +909,7 @@ function GameLibrary3D({ games = [] }) {
       
       // Dispose of geometries and materials
       scene.traverse((object) => {
-        if (object instanceof THREE.Mesh) {
+        if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
           object.geometry?.dispose()
           if (Array.isArray(object.material)) {
             object.material.forEach(material => {
@@ -800,6 +924,12 @@ function GameLibrary3D({ games = [] }) {
           }
         }
       })
+      
+      // Clear refs
+      gameBoxesRef.current = []
+      boxEdgesRef.current = []
+      holeMeshesRef.current = []
+      holeEdgesRef.current = []
       
       renderer.dispose()
     }
