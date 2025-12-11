@@ -20,9 +20,15 @@ function GameLibrary3D({ games = [] }) {
   const raycasterRef = useRef(new THREE.Raycaster())
   const mouseRef = useRef(new THREE.Vector2())
   const hoveredHoleRef = useRef(null) // Currently hovered hole
+  const fpsCounterRef = useRef(null) // FPS counter element
 
   useEffect(() => {
     if (!mountRef.current) return
+
+    // Detect mobile device for performance optimizations
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+                     (window.innerWidth <= 768) || 
+                     ('ontouchstart' in window)
 
     // Scene setup
     const scene = new THREE.Scene()
@@ -40,53 +46,60 @@ function GameLibrary3D({ games = [] }) {
     camera.lookAt(0, 3, 0) // Look at center of tall wall
     cameraRef.current = camera
 
-    // Renderer setup with better quality
+    // Renderer setup with adaptive quality for mobile
     const renderer = new THREE.WebGLRenderer({ 
-      antialias: true,
+      antialias: !isMobile, // Disable antialiasing on mobile for performance
       alpha: false,
       powerPreference: "high-performance"
     })
     renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight)
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)) // Cap pixel ratio for performance
-    renderer.shadowMap.enabled = true
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    // Lower pixel ratio on mobile for better performance
+    renderer.setPixelRatio(isMobile ? Math.min(window.devicePixelRatio, 1) : Math.min(window.devicePixelRatio, 2))
+    renderer.shadowMap.enabled = !isMobile // Disable shadows on mobile
+    renderer.shadowMap.type = isMobile ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     renderer.toneMappingExposure = 1.2 // Slightly brighter
     mountRef.current.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
     // Enhanced lighting - well lit room with window as main source
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.0) // Increased for brighter ceiling
+    // Optimize lighting for mobile
+    const ambientLight = new THREE.AmbientLight(0xffffff, isMobile ? 1.2 : 1.0) // Brighter ambient on mobile to compensate for fewer lights
     scene.add(ambientLight)
 
     // Main directional light from window (top, slanted ceiling area)
-    const mainLight = new THREE.DirectionalLight(0xb3d9ff, 1.5) // Sky blue tint from window
+    const mainLight = new THREE.DirectionalLight(0xb3d9ff, isMobile ? 1.2 : 1.5) // Slightly dimmer on mobile
     mainLight.position.set(0, 12, 2) // Above, coming from window area
-    mainLight.castShadow = true
-    mainLight.shadow.mapSize.width = 4096
-    mainLight.shadow.mapSize.height = 4096
-    mainLight.shadow.camera.near = 0.5
-    mainLight.shadow.camera.far = 25
-    mainLight.shadow.camera.left = -10
-    mainLight.shadow.camera.right = 10
-    mainLight.shadow.camera.top = 8
-    mainLight.shadow.camera.bottom = -3
-    mainLight.shadow.bias = -0.0001
-    mainLight.shadow.normalBias = 0.02
-    mainLight.shadow.radius = 8 // Softer shadows
-    mainLight.shadow.bias = -0.0005 // Reduce shadow artifacts
+    if (!isMobile) {
+      mainLight.castShadow = true
+      mainLight.shadow.mapSize.width = 2048 // Reduced from 4096 for better performance
+      mainLight.shadow.mapSize.height = 2048
+      mainLight.shadow.camera.near = 0.5
+      mainLight.shadow.camera.far = 25
+      mainLight.shadow.camera.left = -10
+      mainLight.shadow.camera.right = 10
+      mainLight.shadow.camera.top = 8
+      mainLight.shadow.camera.bottom = -3
+      mainLight.shadow.bias = -0.0005
+      mainLight.shadow.normalBias = 0.02
+      mainLight.shadow.radius = 4 // Reduced from 8 for better performance
+    }
     scene.add(mainLight)
 
-    // Additional fill light to ensure well-lit room
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.6)
-    fillLight.position.set(-2, 4, 3)
-    fillLight.castShadow = false
-    scene.add(fillLight)
+    // Additional fill light to ensure well-lit room (only on desktop)
+    if (!isMobile) {
+      const fillLight = new THREE.DirectionalLight(0xffffff, 0.6)
+      fillLight.position.set(-2, 4, 3)
+      fillLight.castShadow = false
+      scene.add(fillLight)
+    }
 
-    // Hemisphere light for natural sky/ground lighting
-    const hemiLight = new THREE.HemisphereLight(0xb3d9ff, 0xffffff, 0.4)
-    hemiLight.position.set(0, 12, 0)
-    scene.add(hemiLight)
+    // Hemisphere light for natural sky/ground lighting (only on desktop)
+    if (!isMobile) {
+      const hemiLight = new THREE.HemisphereLight(0xb3d9ff, 0xffffff, 0.4)
+      hemiLight.position.set(0, 12, 0)
+      scene.add(hemiLight)
+    }
 
     // Floor - dark chestnut hardwood
     const floorTexture = createChestnutHardwoodTexture()
@@ -502,11 +515,12 @@ function GameLibrary3D({ games = [] }) {
       const ledgeDepth = holeDepth + ledgeProtrusion // Ledge extends into the hole and protrudes
       
       // Create rounded ledge to match the rounded hole
+      // Reduce segments on mobile for better performance
       const ledgeGeometry = new RoundedBoxGeometry(
         hole.width,
         ledgeThickness,
         ledgeDepth,
-        3, // segments
+        isMobile ? 2 : 3, // Fewer segments on mobile
         0.15 // corner radius (same as holes)
       )
       
@@ -579,11 +593,12 @@ function GameLibrary3D({ games = [] }) {
         boxesPerHole[holeIndex]++
         
         // Create PS5-style game box
+        // Reduce segments on mobile for better performance
         const boxGeometry = new RoundedBoxGeometry(
           boxWidth,
           boxHeight,
           boxDepth,
-          2, // segments for rounded corners
+          isMobile ? 1 : 2, // Fewer segments on mobile
           0.005 // small corner radius
         )
         
@@ -621,6 +636,13 @@ function GameLibrary3D({ games = [] }) {
           textureLoader.load(
             game.image,
             (texture) => {
+              // Reduce texture quality on mobile for better performance
+              if (isMobile) {
+                // Use lower quality texture filtering on mobile
+                texture.minFilter = THREE.LinearFilter
+                texture.magFilter = THREE.LinearFilter
+                texture.generateMipmaps = false
+              }
               // Update the front face material (index 4) with the cover image
               materials[4] = new THREE.MeshStandardMaterial({
                 map: texture,
@@ -690,8 +712,8 @@ function GameLibrary3D({ games = [] }) {
     const handleMouseDown = (e) => {
       // Start camera dragging
       isDraggingRef.current = true
-      lastMouseXRef.current = e.clientX
-      lastMouseYRef.current = e.clientY
+      lastMouseXRef.current = e.clientX || e.touches?.[0]?.clientX || 0
+      lastMouseYRef.current = e.clientY || e.touches?.[0]?.clientY || 0
       if (mountRef.current) {
         mountRef.current.style.cursor = 'grabbing'
       }
@@ -702,8 +724,11 @@ function GameLibrary3D({ games = [] }) {
       const rect = rendererRef.current?.domElement.getBoundingClientRect()
       if (!rect) return
       
-      const mouseX = e.clientX - rect.left
-      const mouseY = e.clientY - rect.top
+      // Support both mouse and touch events
+      const eventClientX = e.clientX || e.touches?.[0]?.clientX || 0
+      const eventClientY = e.clientY || e.touches?.[0]?.clientY || 0
+      const mouseX = eventClientX - rect.left
+      const mouseY = eventClientY - rect.top
       
       // Check if mouse is within canvas bounds
       if (mouseX < 0 || mouseX > rect.width || mouseY < 0 || mouseY > rect.height) {
@@ -767,8 +792,9 @@ function GameLibrary3D({ games = [] }) {
       
       if (!isDraggingRef.current) return
       
-      const deltaX = e.clientX - lastMouseXRef.current
-      const deltaY = e.clientY - lastMouseYRef.current
+      // Use the eventClientX/eventClientY we already calculated above
+      const deltaX = eventClientX - lastMouseXRef.current
+      const deltaY = eventClientY - lastMouseYRef.current
       const sensitivity = 0.004
       
       // Horizontal rotation - constrained to ±30 degrees
@@ -779,8 +805,8 @@ function GameLibrary3D({ games = [] }) {
       // Vertical rotation (pitch) - no constraints, free rotation
       cameraPitchRef.current -= deltaY * sensitivity // Negative for natural up/down
       
-      lastMouseXRef.current = e.clientX
-      lastMouseYRef.current = e.clientY
+      lastMouseXRef.current = eventClientX
+      lastMouseYRef.current = eventClientY
     }
 
     const handleMouseUp = () => {
@@ -792,30 +818,23 @@ function GameLibrary3D({ games = [] }) {
 
     // Touch controls for mobile
     const handleTouchStart = (e) => {
+      e.preventDefault()
       if (e.touches.length === 1) {
         isDraggingRef.current = true
         lastMouseXRef.current = e.touches[0].clientX
         lastMouseYRef.current = e.touches[0].clientY
+        if (mountRef.current) {
+          mountRef.current.style.cursor = 'grabbing'
+        }
       }
     }
 
     const handleTouchMove = (e) => {
+      e.preventDefault()
       if (!isDraggingRef.current || e.touches.length !== 1) return
       
-      const deltaX = e.touches[0].clientX - lastMouseXRef.current
-      const deltaY = e.touches[0].clientY - lastMouseYRef.current
-      const sensitivity = 0.004
-      
-      // Horizontal rotation - constrained to ±30 degrees
-      cameraAngleRef.current += deltaX * sensitivity
-      const maxAngle = (30 * Math.PI) // Convert 30 degrees to radians
-      cameraAngleRef.current = Math.max(-maxAngle, Math.min(maxAngle, cameraAngleRef.current))
-      
-      // Vertical rotation (pitch) - no constraints, free rotation
-      cameraPitchRef.current -= deltaY * sensitivity // Negative for natural up/down
-      
-      lastMouseXRef.current = e.touches[0].clientX
-      lastMouseYRef.current = e.touches[0].clientY
+      // Use handleMouseMove for consistency
+      handleMouseMove(e)
     }
 
     const handleTouchEnd = () => {
@@ -845,9 +864,49 @@ function GameLibrary3D({ games = [] }) {
     renderer.domElement.addEventListener('touchmove', handleTouchMove)
     renderer.domElement.addEventListener('touchend', handleTouchEnd)
 
-    // Animation loop
-    const animate = () => {
+    // Animation loop with frame rate throttling for mobile
+    let lastFrameTime = 0
+    const targetFPS = 60
+    const frameInterval = 1000 / targetFPS
+    let frameSkip = 0
+    const skipFrames = isMobile ? 1 : 0 // Skip every other frame on mobile for 30fps
+    
+    // FPS calculation
+    let fps = 0
+    let frameCount = 0
+    let fpsLastTime = performance.now()
+    
+    const animate = (currentTime) => {
       requestAnimationFrame(animate)
+      
+      // Calculate FPS
+      frameCount++
+      const fpsDeltaTime = currentTime - fpsLastTime
+      if (fpsDeltaTime >= 1000) {
+        fps = Math.round((frameCount * 1000) / fpsDeltaTime)
+        frameCount = 0
+        fpsLastTime = currentTime
+        
+        // Update FPS counter display
+        if (fpsCounterRef.current) {
+          fpsCounterRef.current.textContent = `${fps} FPS`
+        }
+      }
+      
+      // Frame skipping for mobile to maintain smooth performance
+      if (isMobile) {
+        frameSkip++
+        if (frameSkip % 2 !== 0) {
+          return // Skip this frame
+        }
+      }
+      
+      // Throttle frame rate on mobile
+      const deltaTime = currentTime - lastFrameTime
+      if (isMobile && deltaTime < frameInterval) {
+        return
+      }
+      lastFrameTime = currentTime
 
       // Update hole edge highlights to follow their hole meshes
       holeEdgesRef.current.forEach(edge => {
@@ -880,7 +939,7 @@ function GameLibrary3D({ games = [] }) {
 
       renderer.render(scene, camera)
     }
-    animate()
+    animate(0)
 
     // Handle window resize
     const handleResize = () => {
@@ -938,9 +997,17 @@ function GameLibrary3D({ games = [] }) {
   return (
     <div 
       ref={mountRef} 
-      className="w-full h-[500px] md:h-[600px] rounded-xl overflow-hidden border border-gray-700 mt-8"
+      className="w-full h-[500px] md:h-[600px] rounded-xl overflow-hidden border border-gray-700 mt-8 relative"
       style={{ cursor: 'grab' }}
-    />
+    >
+      <div
+        ref={fpsCounterRef}
+        className="absolute top-2 right-2 bg-black bg-opacity-70 text-white text-sm font-mono px-2 py-1 rounded z-10 pointer-events-none"
+        style={{ fontFamily: 'monospace' }}
+      >
+        0 FPS
+      </div>
+    </div>
   )
 }
 
