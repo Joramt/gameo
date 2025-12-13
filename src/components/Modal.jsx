@@ -28,24 +28,24 @@ function Modal({ isOpen, onClose, children, title }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-20 md:pt-32 bg-black/60 backdrop-blur-md"
+      className="fixed inset-0 z-50 flex items-center justify-center md:items-start md:pt-20 md:pt-32 bg-black/60 backdrop-blur-md"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
           onClose()
         }
       }}
     >
-      <div className="relative w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+      <div className="relative w-full h-full md:w-full md:max-w-md md:h-auto md:mx-4 md:max-h-[90vh] md:rounded-2xl overflow-y-auto">
         {/* Gradient border effect */}
-        <div className="absolute inset-0 bg-gradient-to-r from-purple-500/40 via-pink-500/40 to-purple-500/40 rounded-2xl blur-xl opacity-40"></div>
+        <div className="absolute inset-0 bg-gradient-to-r from-purple-500/40 via-pink-500/40 to-purple-500/40 md:rounded-2xl blur-xl opacity-40"></div>
         
         {/* Main modal container */}
-        <div className="relative rounded-2xl border border-white/20 shadow-2xl overflow-hidden">
+        <div className="relative h-full md:h-auto md:rounded-2xl border-0 md:border border-white/20 shadow-2xl overflow-hidden flex flex-col">
           {/* Animated background gradient with reduced opacity */}
           <div className="absolute inset-0 animated-gradient opacity-15"></div>
           
           {/* Content container with backdrop blur */}
-          <div className="relative bg-black/30 backdrop-blur-lg rounded-2xl p-6 md:p-8">
+          <div className="relative flex-1 flex flex-col justify-center bg-black/30 backdrop-blur-lg md:rounded-2xl p-6 md:p-8">
             {/* Subtle gradient top border */}
             <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-purple-500/50 to-transparent"></div>
           
