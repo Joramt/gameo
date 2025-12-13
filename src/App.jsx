@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext'
 const LandingPage = lazy(() => import('./components/LandingPage'))
 const Dashboard = lazy(() => import('./components/Dashboard'))
 const BudgetSetup = lazy(() => import('./components/BudgetSetup'))
+const Integrations = lazy(() => import('./components/Integrations'))
 
 function AppContent() {
   const { isLoading } = useAuth()
@@ -23,6 +24,7 @@ function AppContent() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/budget-setup" element={<BudgetSetup />} />
+          <Route path="/integrations" element={<Integrations />} />
         </Routes>
       </Suspense>
     </Router>

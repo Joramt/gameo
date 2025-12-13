@@ -199,6 +199,16 @@ function Dashboard() {
               <span className="text-2xl font-bold text-white">Gameo</span>
             </div>
             <div className="flex items-center space-x-4">
+              <button
+                onClick={() => navigate('/integrations')}
+                className="hidden md:flex items-center space-x-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                aria-label="Integrations"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+                <span>Integrations</span>
+              </button>
               <div className="flex items-center space-x-3">
                 {user?.picture && (
                   <img
@@ -207,7 +217,7 @@ function Dashboard() {
                     className="w-10 h-10 rounded-full"
                   />
                 )}
-                <span className="text-white">{user?.name || user?.email}</span>
+                <span className="text-white hidden md:inline">{user?.name || user?.email}</span>
               </div>
               <button
                 onClick={() => logout()}
@@ -219,6 +229,21 @@ function Dashboard() {
           </div>
         </div>
       </nav>
+
+      {/* Mobile Menu Button */}
+      <div className="md:hidden bg-gray-800/50 border-b border-gray-700">
+        <div className="container mx-auto px-6 py-3">
+          <button
+            onClick={() => navigate('/integrations')}
+            className="flex items-center space-x-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors w-full justify-center"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+            <span>Connect Services</span>
+          </button>
+        </div>
+      </div>
 
       {/* Dashboard Content */}
       <div className="container mx-auto px-6 py-6 md:py-12">

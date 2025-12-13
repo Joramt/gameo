@@ -39,8 +39,15 @@ JWT_SECRET=your-secret-key-change-in-production
 
 # Supabase Configuration
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SUPABASE_ANON_KEY=your-anon-key-here
+
+# Steam Integration (see ENV_SETUP.md for details)
+STEAM_API_KEY=your-steam-api-key-from-steam-community-dev
+STEAM_RETURN_URL=http://localhost:3000/api/integrations/steam/callback
+FRONTEND_URL=http://localhost:5173
 ```
+
+**📖 For detailed instructions on where to find these values, see [ENV_SETUP.md](./ENV_SETUP.md)**
 
 4. Set up the database schema in Supabase:
    - Run the SQL in `database/schema.sql` in your Supabase SQL editor

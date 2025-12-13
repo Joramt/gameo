@@ -5,12 +5,14 @@ import dotenv from 'dotenv'
 import { steamRouter } from './routes/steam.js'
 import { authRouter } from './routes/auth.js'
 import { budgetRouter } from './routes/budget.js'
+import { integrationsRouter } from './routes/integrations.js'
 
 // Verify routes are loaded
 console.log('✅ Routes loaded:', {
   steam: !!steamRouter,
   auth: !!authRouter,
-  budget: !!budgetRouter
+  budget: !!budgetRouter,
+  integrations: !!integrationsRouter
 })
 
 dotenv.config()
@@ -77,6 +79,7 @@ app.get('/health', (req, res) => {
 app.use('/api/steam', steamRouter)
 app.use('/api/auth', authRouter)
 app.use('/api/budget', budgetRouter)
+app.use('/api/integrations', integrationsRouter)
 
 // 404 handler
 app.use((req, res) => {
