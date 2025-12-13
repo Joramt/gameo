@@ -301,3 +301,4 @@ After successful deployment:
 **Update Auth0:**
 - Callback/Logout/Web Origins = Frontend URL
 
+

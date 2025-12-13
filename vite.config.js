@@ -34,7 +34,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'auth-vendor': ['@auth0/auth0-react'],
         },
       },
     },

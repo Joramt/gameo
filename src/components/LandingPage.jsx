@@ -1,41 +1,53 @@
-import { useAuth0 } from '@auth0/auth0-react'
+import { useAuth } from '../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
-import { useEffect } from 'react'
-
-const domain = import.meta.env.VITE_AUTH0_DOMAIN
-const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID
-const isAuth0Configured = domain && clientId && 
-  !domain.includes('example') && 
-  !clientId.includes('example')
+import { useEffect, useState } from 'react'
+import LoginForm from './LoginForm'
+import SignupForm from './SignupForm'
+import Modal from './Modal'
 
 function LandingPage() {
-  const { loginWithRedirect, isAuthenticated } = useAuth0()
+  const { isAuthenticated, hasBudget, isLoading } = useAuth()
   const navigate = useNavigate()
+  const [showLoginModal, setShowLoginModal] = useState(false)
+  const [showSignupModal, setShowSignupModal] = useState(false)
 
   useEffect(() => {
-    if (isAuthenticated && isAuth0Configured) {
-      navigate('/dashboard')
+    if (!isLoading && isAuthenticated) {
+      // Close modals if authenticated
+      setShowLoginModal(false)
+      setShowSignupModal(false)
+      
+      // Redirect based on budget status (only if we've checked it)
+      if (hasBudget === false) {
+        navigate('/budget-setup', { replace: true })
+      } else if (hasBudget === true) {
+        navigate('/dashboard', { replace: true })
+      }
+      // If hasBudget is null, wait for it to be checked
     }
-  }, [isAuthenticated, navigate])
+  }, [isAuthenticated, hasBudget, isLoading, navigate])
+  
+  // Debug log
+  useEffect(() => {
+    console.log('LandingPage state:', { isAuthenticated, hasBudget, isLoading })
+  }, [isAuthenticated, hasBudget, isLoading])
 
   const handleSignUp = () => {
-    if (isAuth0Configured) {
-      loginWithRedirect({
-        screen_hint: 'signup',
-      })
-    } else {
-      // Fallback: navigate to dashboard without auth (demo mode)
-      navigate('/dashboard')
-    }
+    setShowSignupModal(true)
+    setShowLoginModal(false)
   }
 
   const handleLogin = () => {
-    if (isAuth0Configured) {
-      loginWithRedirect()
-    } else {
-      // Fallback: navigate to dashboard without auth (demo mode)
-      navigate('/dashboard')
-    }
+    setShowLoginModal(true)
+    setShowSignupModal(false)
+  }
+
+  const handleCloseLogin = () => {
+    setShowLoginModal(false)
+  }
+
+  const handleCloseSignup = () => {
+    setShowSignupModal(false)
   }
 
   return (
@@ -95,6 +107,35 @@ function LandingPage() {
           </div>
         </div>
       </div>
+
+      {/* Auth Modals */}
+      <Modal
+        isOpen={showLoginModal}
+        onClose={handleCloseLogin}
+        title="Sign In"
+      >
+        <LoginForm
+          onSwitchToSignup={() => {
+            setShowLoginModal(false)
+            setShowSignupModal(true)
+          }}
+          onClose={handleCloseLogin}
+        />
+      </Modal>
+
+      <Modal
+        isOpen={showSignupModal}
+        onClose={handleCloseSignup}
+        title="Create Account"
+      >
+        <SignupForm
+          onSwitchToLogin={() => {
+            setShowSignupModal(false)
+            setShowLoginModal(true)
+          }}
+          onClose={handleCloseSignup}
+        />
+      </Modal>
 
       {/* Features Section */}
       <div className="container mx-auto px-6 py-20">

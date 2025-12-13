@@ -3,6 +3,15 @@ import cors from 'cors'
 import rateLimit from 'express-rate-limit'
 import dotenv from 'dotenv'
 import { steamRouter } from './routes/steam.js'
+import { authRouter } from './routes/auth.js'
+import { budgetRouter } from './routes/budget.js'
+
+// Verify routes are loaded
+console.log('✅ Routes loaded:', {
+  steam: !!steamRouter,
+  auth: !!authRouter,
+  budget: !!budgetRouter
+})
 
 dotenv.config()
 
@@ -66,6 +75,8 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api/steam', steamRouter)
+app.use('/api/auth', authRouter)
+app.use('/api/budget', budgetRouter)
 
 // 404 handler
 app.use((req, res) => {

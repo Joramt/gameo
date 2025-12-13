@@ -1,4 +1,4 @@
-import { useAuth0 } from '@auth0/auth0-react'
+import { useAuth } from '../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useState, useRef } from 'react'
 import GameCard from './GameCard'
@@ -8,21 +8,9 @@ import GameInfoModal from './GameInfoModal'
 import GameLibrary3D from './GameLibrary3D'
 import { storageService } from '../services/storage'
 
-const domain = import.meta.env.VITE_AUTH0_DOMAIN
-const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID
-const isAuth0Configured = domain && clientId && 
-  !domain.includes('example') && 
-  !clientId.includes('example')
-
 function Dashboard() {
-  const { isAuthenticated: authIsAuthenticated, user: authUser, logout: authLogout, isLoading: authIsLoading } = useAuth0()
+  const { isAuthenticated, user, logout, isLoading, hasBudget } = useAuth()
   const navigate = useNavigate()
-  
-  // In demo mode (Auth0 not configured), allow access
-  const isAuthenticated = isAuth0Configured ? authIsAuthenticated : true
-  const user = isAuth0Configured ? authUser : { name: 'Demo User', email: 'demo@gameo.com' }
-  const logout = isAuth0Configured ? authLogout : null
-  const isLoading = isAuth0Configured ? authIsLoading : false
 
   const [recentGames, setRecentGames] = useState([])
   const [isAddGameModalOpen, setIsAddGameModalOpen] = useState(false)
@@ -39,7 +27,7 @@ function Dashboard() {
   const isScrolling = useRef(false)
 
   // Get user ID for storage
-  const userId = user?.sub || user?.email || 'demo-user'
+  const userId = user?.id || user?.email || 'demo-user'
 
   // Load games from storage on mount
   useEffect(() => {
@@ -177,30 +165,18 @@ function Dashboard() {
   }
 
   useEffect(() => {
-    // Only redirect if Auth0 is configured and user is not authenticated
-    if (isAuth0Configured && !isLoading && !isAuthenticated) {
+    if (!isLoading && !isAuthenticated) {
       navigate('/')
     }
+    // Don't auto-redirect to budget-setup from dashboard - let the login/signup flow handle that
   }, [isAuthenticated, isLoading, navigate])
 
-  // Add timeout for loading state to prevent infinite loading
-  useEffect(() => {
-    if (isLoading && isAuth0Configured) {
-      // Timeout handled silently - user will see loading state
-      const timer = setTimeout(() => {
-        // Could show user-friendly error message here in production
-      }, 5000)
-      return () => clearTimeout(timer)
-    }
-  }, [isLoading])
-
-  if (isLoading && isAuth0Configured) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <div className="text-white text-xl">Loading...</div>
-          <p className="text-gray-400 text-sm mt-2">If this takes too long, check your Auth0 configuration</p>
         </div>
       </div>
     )
@@ -233,19 +209,12 @@ function Dashboard() {
                 )}
                 <span className="text-white">{user?.name || user?.email}</span>
               </div>
-              {logout && (
-                <button
-                  onClick={() => logout({ returnTo: window.location.origin })}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                >
-                  Logout
-                </button>
-              )}
-              {!isAuth0Configured && (
-                <div className="px-4 py-2 bg-yellow-600 text-white rounded-lg text-sm">
-                  Demo Mode
-                </div>
-              )}
+              <button
+                onClick={() => logout()}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Logout
+              </button>
             </div>
           </div>
         </div>

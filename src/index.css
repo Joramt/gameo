@@ -83,3 +83,35 @@ body {
   background: #6b7280;
 }
 
+/* Animated gradient background for modals */
+@keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animated-gradient {
+  background: linear-gradient(
+    -45deg,
+    #8b5cf6,
+    #ec4899,
+    #6366f1,
+    #ec4899,
+    #8b5cf6
+  );
+  background-size: 400% 400%;
+  animation: gradientShift 15s ease infinite;
+}
+
+/* Sleek shadow for modal titles */
+.modal-title-shadow {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5)) 
+          drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+}
+

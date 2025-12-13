@@ -1,15 +1,19 @@
 # Gameo Backend Server
 
-Node.js backend server for Gameo that proxies Steam API requests with caching and rate limiting.
+Node.js backend server for Gameo that handles authentication, budget management, and proxies Steam API requests with caching.
 
 ## Features
 
+- ✅ User authentication (signup, login, logout)
+- ✅ Budget management (create/update user budgets)
 - ✅ Steam API proxy with CORS whitelist
 - ✅ 7-day cache expiration for Steam API responses
 - ✅ Cache busting endpoint
 - ✅ Rate limiting (100 requests/15min global, 50 requests/15min for Steam endpoints)
 - ✅ Request logging
 - ✅ Health check endpoint
+- ✅ JWT-based authentication
+- ✅ Supabase database integration
 
 ## Setup
 
@@ -29,7 +33,18 @@ cp .env.example .env
 PORT=3000
 NODE_ENV=development
 ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+
+# JWT Secret (generate a secure random string for production)
+JWT_SECRET=your-secret-key-change-in-production
+
+# Supabase Configuration
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
+
+4. Set up the database schema in Supabase:
+   - Run the SQL in `database/schema.sql` in your Supabase SQL editor
+   - This creates the `users` and `budgets` tables
 
 4. Start the server:
 ```bash
@@ -41,6 +56,56 @@ npm start
 ```
 
 ## API Endpoints
+
+### Authentication
+
+#### Sign Up
+```
+POST /api/auth/signup
+Body: { name, email, password }
+Returns: { token, user: { id, email, name } }
+```
+
+#### Login
+```
+POST /api/auth/login
+Body: { email, password }
+Returns: { token, user: { id, email, name } }
+```
+
+#### Get Current User
+```
+GET /api/auth/me
+Headers: Authorization: Bearer <token>
+Returns: { id, email, name }
+```
+
+#### Logout
+```
+POST /api/auth/logout
+Headers: Authorization: Bearer <token>
+Returns: { message: "Logged out successfully" }
+```
+
+### Budget Management
+
+#### Get Budget
+```
+GET /api/budget
+Headers: Authorization: Bearer <token>
+Returns: { budget: { id, amount, period, created_at, updated_at } }
+Status: 404 if no budget found
+```
+
+#### Create/Update Budget
+```
+POST /api/budget
+Headers: Authorization: Bearer <token>
+Body: { amount: number, period: "weekly" | "monthly" | "yearly" }
+Returns: { budget: { id, amount, period, created_at, updated_at } }
+```
+
+### Steam API
 
 ### Health Check
 ```
