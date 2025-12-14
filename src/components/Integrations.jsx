@@ -188,14 +188,13 @@ function Integrations() {
         setIsSyncing(true)
         setSyncProgress({ current: 0, total: totalGames, currentGame: '' })
         
-        // Wait a bit to let the modal render
-        await new Promise(resolve => setTimeout(resolve, 100))
-        
         // Transform Steam games and add to database
         let addedCount = 0
         let skippedCount = 0
         let processedCount = 0
         
+        // Prepare all games for batch processing
+        const gamesToProcess = []
         for (let i = 0; i < steamGames.length; i++) {
           const steamGame = steamGames[i]
           
@@ -205,137 +204,162 @@ function Integrations() {
             continue
           }
           
-          processedCount++
+          gamesToProcess.push(steamGame)
+        }
+        
+        // Update progress function - only update at milestones to reduce overhead
+        const updateProgressIfNeeded = () => {
+          const progressPercent = Math.floor((processedCount / totalGames) * 100)
+          const shouldUpdate = processedCount === 0 || 
+                              processedCount === totalGames ||
+                              processedCount % 10 === 0 || // Every 10 games
+                              [10, 25, 50, 75].includes(progressPercent) // At milestones
           
-          // Update progress - use a function to ensure state updates properly
-          setSyncProgress({ 
-            current: processedCount, 
-            total: totalGames, 
-            currentGame: steamGame.name || 'Unknown Game' 
-          })
-          
-          // Small delay to allow React to re-render and show progress
-          await new Promise(resolve => setTimeout(resolve, 50))
-          
-          // Fetch detailed game information
-          let studioName = 'Unknown Studio'
-          let formattedReleaseDate = ''
-          let gamePrice = null // Will store price if available
-          
-          try {
-            const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${steamGame.appid}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              },
+          if (shouldUpdate) {
+            requestAnimationFrame(() => {
+              setSyncProgress({ 
+                current: processedCount, 
+                total: totalGames, 
+                currentGame: gamesToProcess[Math.min(processedCount - 1, gamesToProcess.length - 1)]?.name || 'Processing...' 
+              })
             })
-            
-            if (detailsResponse.ok) {
-              const detailsData = await detailsResponse.json()
-              
-              // Get studio from game details
-              if (detailsData.gameDetails?.studio) {
-                studioName = detailsData.gameDetails.studio
-              }
-              
-              // Get and format release date from game details (timestamp in milliseconds)
-              if (detailsData.gameDetails?.releaseDate) {
-                const releaseTimestamp = detailsData.gameDetails.releaseDate
-                const releaseDate = new Date(releaseTimestamp)
-                formattedReleaseDate = releaseDate.toLocaleDateString('en-US', {
-                  month: 'short',
-                  year: 'numeric'
-                })
-              }
-              
-              // Get price from game details (current price)
-              // Note: Steam API doesn't expose purchase history, so we use current price
-              if (detailsData.gameDetails?.price?.final) {
-                // Price is in cents, convert to dollars
-                gamePrice = detailsData.gameDetails.price.final / 100
-              }
-              
-              // Log detailed game information
-              const gameInfo = {
-                name: steamGame.name,
-                appId: steamGame.appid,
-                playtimeForever: steamGame.playtime_forever ? `${Math.round(steamGame.playtime_forever / 60)} hours` : '0 hours',
-                playtimeForeverMinutes: steamGame.playtime_forever || 0,
-                lastPlayed: steamGame.rtime_last_played ? new Date(steamGame.rtime_last_played * 1000).toISOString() : 'Never',
-                currentPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.final / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
-                originalPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.initial / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
-                pricePaid: 'Not available via Steam API (Steam does not expose purchase history)',
-                achievements: detailsData.achievements ? {
-                  total: detailsData.achievements.totalAchievements,
-                  unlocked: detailsData.achievements.unlockedAchievements,
-                  completionPercentage: `${Math.round(detailsData.achievements.completionPercentage)}%`,
-                  isCompleted: detailsData.achievements.isCompleted ? 'Yes' : 'No'
-                } : 'Not available',
-                playerStats: detailsData.playerStats ? 'Available' : 'Not available',
-                releaseDate: detailsData.gameDetails?.releaseDate || 'Not available',
-                studio: detailsData.gameDetails?.studio || 'Not available',
-                genres: detailsData.gameDetails?.genres?.map(g => g.description).join(', ') || 'Not available'
-              }
-              console.log('📊 Detailed Steam Game Information:', gameInfo)
-            }
-          } catch (error) {
-            console.error('Error fetching game details:', error)
-          }
-          
-          // Get game image
-          let imageUrl = ''
-          if (steamGame.appid) {
-            imageUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${steamGame.appid}/library_600x900.jpg`
-          }
-          
-          // Convert playtime from Steam API (minutes) to store in database
-          // Steam API returns playtime_forever in minutes
-          const timePlayedMinutes = steamGame.playtime_forever || 0
-          
-          // Get last played date from Steam API
-          // rtime_last_played is a Unix timestamp in seconds, or 0 if never played
-          let lastPlayedDate = null
-          if (steamGame.rtime_last_played && steamGame.rtime_last_played > 0) {
-            const lastPlayedTimestamp = steamGame.rtime_last_played * 1000 // Convert to milliseconds
-            const lastPlayed = new Date(lastPlayedTimestamp)
-            const now = new Date()
-            
-            // Validate the date is reasonable (not in the future, not too old - older than 5 years is suspicious)
-            const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000)
-            if (!isNaN(lastPlayed.getTime()) && lastPlayed <= now && lastPlayed >= fiveYearsAgo) {
-              lastPlayedDate = lastPlayed.toISOString()
-            }
-          }
-          
-          // Add to database
-          try {
-            const addResponse = await fetch(`${API_URL}/api/games`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                name: steamGame.name || 'Unknown Game',
-                image: imageUrl,
-                releaseDate: formattedReleaseDate,
-                studio: studioName,
-                steamAppId: String(steamGame.appid),
-                timePlayed: timePlayedMinutes,
-                lastPlayed: lastPlayedDate,
-                price: gamePrice, // Use current price from Steam (pricePaid not available via API)
-              }),
-            })
-
-            if (addResponse.ok) {
-              addedCount++
-            } else if (addResponse.status === 409) {
-              skippedCount++
-            }
-          } catch (error) {
-            console.error(`Error adding game ${steamGame.name}:`, error)
           }
         }
+        
+        // Process games in parallel batches to speed up
+        const batchSize = 10
+        for (let i = 0; i < gamesToProcess.length; i += batchSize) {
+          const batch = gamesToProcess.slice(i, i + batchSize)
+          
+          // Process batch in parallel
+          await Promise.all(batch.map(async (steamGame) => {
+            
+            // Fetch detailed game information
+            let studioName = 'Unknown Studio'
+            let formattedReleaseDate = ''
+            let gamePrice = null // Will store price if available
+            
+            try {
+              const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${steamGame.appid}`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+              })
+              
+              if (detailsResponse.ok) {
+                const detailsData = await detailsResponse.json()
+                
+                // Get studio from game details
+                if (detailsData.gameDetails?.studio) {
+                  studioName = detailsData.gameDetails.studio
+                }
+                
+                // Get and format release date from game details (timestamp in milliseconds)
+                if (detailsData.gameDetails?.releaseDate) {
+                  const releaseTimestamp = detailsData.gameDetails.releaseDate
+                  const releaseDate = new Date(releaseTimestamp)
+                  formattedReleaseDate = releaseDate.toLocaleDateString('en-US', {
+                    month: 'short',
+                    year: 'numeric'
+                  })
+                }
+                
+                // Get price from game details (current price)
+                // Note: Steam API doesn't expose purchase history, so we use current price
+                if (detailsData.gameDetails?.price?.final) {
+                  // Price is in cents, convert to dollars
+                  gamePrice = detailsData.gameDetails.price.final / 100
+                }
+                
+                // Log detailed game information
+                const gameInfo = {
+                  name: steamGame.name,
+                  appId: steamGame.appid,
+                  playtimeForever: steamGame.playtime_forever ? `${Math.round(steamGame.playtime_forever / 60)} hours` : '0 hours',
+                  playtimeForeverMinutes: steamGame.playtime_forever || 0,
+                  lastPlayed: steamGame.rtime_last_played ? new Date(steamGame.rtime_last_played * 1000).toISOString() : 'Never',
+                  currentPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.final / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
+                  originalPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.initial / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
+                  pricePaid: 'Not available via Steam API (Steam does not expose purchase history)',
+                  achievements: detailsData.achievements ? {
+                    total: detailsData.achievements.totalAchievements,
+                    unlocked: detailsData.achievements.unlockedAchievements,
+                    completionPercentage: `${Math.round(detailsData.achievements.completionPercentage)}%`,
+                    isCompleted: detailsData.achievements.isCompleted ? 'Yes' : 'No'
+                  } : 'Not available',
+                  playerStats: detailsData.playerStats ? 'Available' : 'Not available',
+                  releaseDate: detailsData.gameDetails?.releaseDate || 'Not available',
+                  studio: detailsData.gameDetails?.studio || 'Not available',
+                  genres: detailsData.gameDetails?.genres?.map(g => g.description).join(', ') || 'Not available'
+                }
+                console.log('📊 Detailed Steam Game Information:', gameInfo)
+              }
+            } catch (error) {
+              console.error('Error fetching game details:', error)
+            }
+            
+            // Get game image
+            let imageUrl = ''
+            if (steamGame.appid) {
+              imageUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${steamGame.appid}/library_600x900.jpg`
+            }
+            
+            // Convert playtime from Steam API (minutes) to store in database
+            // Steam API returns playtime_forever in minutes
+            const timePlayedMinutes = steamGame.playtime_forever || 0
+            
+            // Get last played date from Steam API
+            // rtime_last_played is a Unix timestamp in seconds, or 0 if never played
+            let lastPlayedDate = null
+            if (steamGame.rtime_last_played && steamGame.rtime_last_played > 0) {
+              const lastPlayedTimestamp = steamGame.rtime_last_played * 1000 // Convert to milliseconds
+              const lastPlayed = new Date(lastPlayedTimestamp)
+              const now = new Date()
+              
+              // Validate the date is reasonable (not in the future, not too old - older than 5 years is suspicious)
+              const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000)
+              if (!isNaN(lastPlayed.getTime()) && lastPlayed <= now && lastPlayed >= fiveYearsAgo) {
+                lastPlayedDate = lastPlayed.toISOString()
+              }
+            }
+            
+            // Add to database
+            try {
+              const addResponse = await fetch(`${API_URL}/api/games`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  name: steamGame.name || 'Unknown Game',
+                  image: imageUrl,
+                  releaseDate: formattedReleaseDate,
+                  studio: studioName,
+                  steamAppId: String(steamGame.appid),
+                  timePlayed: timePlayedMinutes,
+                  lastPlayed: lastPlayedDate,
+                  price: gamePrice, // Use current price from Steam (pricePaid not available via API)
+                }),
+              })
+
+              if (addResponse.ok) {
+                addedCount++
+              } else if (addResponse.status === 409) {
+                skippedCount++
+              }
+            } catch (error) {
+              console.error(`Error adding game ${steamGame.name}:`, error)
+            } finally {
+              processedCount++
+              updateProgressIfNeeded()
+            }
+          }))
+        }
+        
+        // Final progress update
+        setSyncProgress({ current: totalGames, total: totalGames, currentGame: 'Complete!' })
         
         // Mark sync as complete in database
         const syncCompleteResponse = await fetch(`${API_URL}/api/integrations/steam/sync-complete`, {
@@ -431,7 +455,7 @@ function Integrations() {
             <div 
               className={`bg-blue-500/10 border border-blue-500/30 rounded-2xl mb-8 relative overflow-hidden transition-all duration-300 ease-in-out ${
                 showHowItWorks 
-                  ? 'opacity-100 max-h-[200px] p-6 pb-6 md:pb-6 mb-8' 
+                  ? 'opacity-100 max-h-[200px] p-4 md:p-6 pb-4 md:pb-6 mb-8' 
                   : 'opacity-0 max-h-0 p-0 mb-0 border-0'
               }`}
             >
@@ -444,13 +468,13 @@ function Integrations() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
-              <div className="flex items-start space-x-4 pr-8 pb-0">
-                <svg className="w-6 h-6 text-blue-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="flex items-start space-x-3 md:space-x-4 pr-8 md:pr-8">
+                <svg className="w-5 h-5 md:w-6 md:h-6 text-blue-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <div className="pb-0">
-                  <h4 className="text-blue-300 font-semibold mb-2">How it works</h4>
-                  <p className="text-gray-300 text-sm leading-relaxed pb-0">
+                <div className="flex-1">
+                  <h4 className="text-blue-300 font-semibold mb-2 text-sm md:text-base">How it works</h4>
+                  <p className="text-gray-300 text-xs md:text-sm leading-relaxed">
                     When you connect your Steam account, we'll securely sync your game library. 
                     Your login credentials are never stored - we use Steam's official authentication 
                     system to access your public game list.
@@ -502,34 +526,35 @@ function Integrations() {
                   </div>
 
                   {/* Service Info */}
-                  <h3 className="text-2xl font-bold text-white mb-2">{service.name}</h3>
+                  <div className="flex items-center gap-3 mb-2">
+                    <h3 className="text-2xl font-bold text-white">{service.name}</h3>
+                    {/* Connection Status - Next to title */}
+                    {isLoadingConnections ? (
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
+                        <span className="text-gray-400 text-sm font-medium">Loading...</span>
+                      </div>
+                    ) : service.connected ? (
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                        <span className="text-green-400 text-sm font-medium">Connected</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
+                        <span className="text-gray-500 text-sm">Not connected</span>
+                      </div>
+                    )}
+                  </div>
                   <p className="text-gray-400 mb-6">{service.description}</p>
 
-                  {/* Connection Status */}
-                  <div className="flex flex-col space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        {service.connected ? (
-                          <>
-                            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                            <span className="text-green-400 text-sm font-medium">Connected</span>
-                          </>
-                        ) : (
-                          <>
-                            <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
-                            <span className="text-gray-500 text-sm">Not connected</span>
-                          </>
-                        )}
-                      </div>
+                  {/* Action Buttons */}
+                  <div className="flex flex-col space-y-3 md:space-y-0">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-2">
 
                       {/* Action Buttons - Connect/Disconnect and Synchronize */}
-                      <div className="flex items-center gap-2">
-                        {isLoadingConnections ? (
-                          // Show loading state to prevent flickering
-                          <div className="px-4 py-2 bg-gray-700/50 text-gray-400 rounded-lg text-sm font-medium">
-                            Loading...
-                          </div>
-                        ) : service.connected ? (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {service.connected ? (
                           <button
                             onClick={() => handleDisconnect(service.id)}
                             className="px-4 py-2 bg-gray-700/50 hover:bg-gray-700 text-white rounded-lg transition-colors text-sm font-medium"
@@ -602,14 +627,14 @@ function Integrations() {
       {isSyncing && (
         <>
           {/* Mobile oscillating indicators */}
-          <div className="fixed top-0 left-0 right-0 h-2 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+          <div className="fixed top-0 left-0 right-0 h-1.5 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
             <div className="relative w-full h-full">
-              <div className="oscillate-indicator w-40 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
+              <div className="oscillate-indicator w-32 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
             </div>
           </div>
-          <div className="fixed bottom-0 left-0 right-0 h-2 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+          <div className="fixed bottom-0 left-0 right-0 h-1.5 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
             <div className="relative w-full h-full">
-              <div className="oscillate-indicator-reverse w-40 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
+              <div className="oscillate-indicator-reverse w-32 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
             </div>
           </div>
         </>

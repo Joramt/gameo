@@ -137,6 +137,35 @@ function GameCard({ game, onTimerClick, onCardClick, onRemove }) {
     return lastPlayedDate >= oneMonthAgo
   }
 
+  // Calculate days since last played (only if within last month)
+  const getDaysSinceLastPlayed = (dateString) => {
+    if (!dateString) return null
+    
+    const lastPlayedDate = new Date(dateString)
+    const now = new Date()
+    
+    // Validate the date is reasonable
+    if (isNaN(lastPlayedDate.getTime())) return null
+    if (lastPlayedDate > now) return null // Can't be in the future
+    
+    const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+    
+    // Only return if within last month (don't show if older than a month)
+    if (lastPlayedDate < oneMonthAgo) return null
+    
+    // Calculate days difference
+    const diffTime = now - lastPlayedDate
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
+    
+    if (diffDays === 0) {
+      return 'Today'
+    } else if (diffDays === 1) {
+      return '1 day ago'
+    } else {
+      return `${diffDays} days ago`
+    }
+  }
+
   // Format price
   const formatPrice = (price) => {
     if (!price || price === 0) return 'Not set'
@@ -223,22 +252,17 @@ function GameCard({ game, onTimerClick, onCardClick, onRemove }) {
               }}>
                 {game.name}
               </h3>
-              {/* Time Played - Smart Format */}
-              {game.timePlayed > 0 && (
-                <p className="text-white/90 text-sm md:text-xs font-medium mb-1" style={{
-                  textShadow: '0 2px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(0, 0, 0, 0.5)'
-                }}>
-                  {formatTimePlayedSmart(game.timePlayed)}
-                </p>
-              )}
-              {/* Last Played - Only show if within last month */}
-              {game.lastPlayed && isLastPlayedRecent(game.lastPlayed) && (
-                <p className="text-white/80 text-xs md:text-[10px] font-medium" style={{
-                  textShadow: '0 2px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(0, 0, 0, 0.5)'
-                }}>
-                  Last played {formatLastPlayed(game.lastPlayed)}
-                </p>
-              )}
+              {/* Days Since Last Played - Only show if within last month */}
+              {(() => {
+                const daysSince = getDaysSinceLastPlayed(game.lastPlayed)
+                return daysSince ? (
+                  <p className="text-white/90 text-sm md:text-xs font-medium mb-1" style={{
+                    textShadow: '0 2px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(0, 0, 0, 0.5)'
+                  }}>
+                    {daysSince}
+                  </p>
+                ) : null
+              })()}
             </div>
           </div>
         </div>

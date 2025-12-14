@@ -13,11 +13,9 @@ function LandingPage() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      // Close modals if authenticated
-      setShowLoginModal(false)
-      setShowSignupModal(false)
-      
       // Redirect based on budget status (only if we've checked it)
+      // Don't close modals here - let them stay open during redirect
+      // The modal will naturally disappear when navigating away
       if (hasBudget === false) {
         navigate('/budget-setup', { replace: true })
       } else if (hasBudget === true) {

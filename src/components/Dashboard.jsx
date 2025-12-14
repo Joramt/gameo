@@ -28,7 +28,16 @@ function Dashboard() {
   // Helper function to categorize games by last played date
   const categorizeGames = (games) => {
     // Sort games by last_played (most recent first), fallback to created_at
+    // Games with lastPlayed always appear before games without lastPlayed
     const sortedGames = [...games].sort((a, b) => {
+      const aHasLastPlayed = !!a.lastPlayed
+      const bHasLastPlayed = !!b.lastPlayed
+      
+      // If one has lastPlayed and the other doesn't, prioritize the one with lastPlayed
+      if (aHasLastPlayed && !bHasLastPlayed) return -1
+      if (!aHasLastPlayed && bHasLastPlayed) return 1
+      
+      // Both have lastPlayed or both don't - sort by date
       const aDate = a.lastPlayed ? new Date(a.lastPlayed) : (a.createdAt ? new Date(a.createdAt) : new Date(0))
       const bDate = b.lastPlayed ? new Date(b.lastPlayed) : (b.createdAt ? new Date(b.createdAt) : new Date(0))
       return bDate - aDate // Most recent first
@@ -38,15 +47,19 @@ function Dashboard() {
     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
     const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
     
+    // Only include games that have a lastPlayed date for these categories
+    // Don't use createdAt as fallback - only show games that were actually played
     const lastWeek = sortedGames.filter(game => {
-      const playDate = game.lastPlayed ? new Date(game.lastPlayed) : (game.createdAt ? new Date(game.createdAt) : null)
-      if (!playDate) return false
+      if (!game.lastPlayed) return false
+      const playDate = new Date(game.lastPlayed)
+      if (isNaN(playDate.getTime())) return false
       return playDate >= oneWeekAgo
     })
     
     const lastMonth = sortedGames.filter(game => {
-      const playDate = game.lastPlayed ? new Date(game.lastPlayed) : (game.createdAt ? new Date(game.createdAt) : null)
-      if (!playDate) return false
+      if (!game.lastPlayed) return false
+      const playDate = new Date(game.lastPlayed)
+      if (isNaN(playDate.getTime())) return false
       return playDate >= oneMonthAgo
     })
     
@@ -249,15 +262,14 @@ function Dashboard() {
         setIsSyncing(true)
         setSyncProgress({ current: 0, total: totalGames, currentGame: '' })
         
-        // Wait a bit to let the modal render
-        await new Promise(resolve => setTimeout(resolve, 100))
-        
         // Transform Steam games and add to database
         const newGames = []
         let addedCount = 0
         let skippedCount = 0
         let processedCount = 0
         
+        // Prepare all games for batch processing
+        const gamesToProcess = []
         for (let i = 0; i < steamGames.length; i++) {
           const steamGame = steamGames[i]
           
@@ -267,140 +279,164 @@ function Dashboard() {
             continue
           }
           
-          processedCount++
+          gamesToProcess.push(steamGame)
+        }
+        
+        // Update progress function - only update at milestones to reduce overhead
+        const updateProgressIfNeeded = () => {
+          const progressPercent = Math.floor((processedCount / totalGames) * 100)
+          const shouldUpdate = processedCount === 0 || 
+                              processedCount === totalGames ||
+                              processedCount % 10 === 0 || // Every 10 games
+                              [10, 25, 50, 75].includes(progressPercent) // At milestones
           
-          // Update progress - use a function to ensure state updates properly
-          setSyncProgress({ 
-            current: processedCount, 
-            total: totalGames, 
-            currentGame: steamGame.name || 'Unknown Game' 
-          })
-          
-          // Small delay to allow React to re-render and show progress
-          await new Promise(resolve => setTimeout(resolve, 50))
-          
-          // Fetch detailed game information
-          let studioName = 'Unknown Studio'
-          let formattedReleaseDate = ''
-          let gamePrice = null // Will store price if available
-          
-          try {
-            const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${steamGame.appid}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              },
+          if (shouldUpdate) {
+            requestAnimationFrame(() => {
+              setSyncProgress({ 
+                current: processedCount, 
+                total: totalGames, 
+                currentGame: gamesToProcess[Math.min(processedCount - 1, gamesToProcess.length - 1)]?.name || 'Processing...' 
+              })
             })
-            
-            if (detailsResponse.ok) {
-              const detailsData = await detailsResponse.json()
-              
-              // Get studio from game details
-              if (detailsData.gameDetails?.studio) {
-                studioName = detailsData.gameDetails.studio
-              }
-              
-              // Get and format release date from game details (timestamp in milliseconds)
-              if (detailsData.gameDetails?.releaseDate) {
-                const releaseTimestamp = detailsData.gameDetails.releaseDate
-                const releaseDate = new Date(releaseTimestamp)
-                formattedReleaseDate = releaseDate.toLocaleDateString('en-US', {
-                  month: 'short',
-                  year: 'numeric'
-                })
-              }
-              
-              // Get price from game details (current price)
-              // Note: Steam API doesn't expose purchase history, so we use current price
-              if (detailsData.gameDetails?.price?.final) {
-                // Price is in cents, convert to dollars
-                gamePrice = detailsData.gameDetails.price.final / 100
-              }
-              
-              // Log detailed game information
-              const gameInfo = {
-                name: steamGame.name,
-                appId: steamGame.appid,
-                playtimeForever: steamGame.playtime_forever ? `${Math.round(steamGame.playtime_forever / 60)} hours` : '0 hours',
-                playtimeForeverMinutes: steamGame.playtime_forever || 0,
-                lastPlayed: steamGame.rtime_last_played ? new Date(steamGame.rtime_last_played * 1000).toISOString() : 'Never',
-                currentPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.final / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
-                originalPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.initial / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
-                pricePaid: 'Not available via Steam API (Steam does not expose purchase history)',
-                achievements: detailsData.achievements ? {
-                  total: detailsData.achievements.totalAchievements,
-                  unlocked: detailsData.achievements.unlockedAchievements,
-                  completionPercentage: `${Math.round(detailsData.achievements.completionPercentage)}%`,
-                  isCompleted: detailsData.achievements.isCompleted ? 'Yes' : 'No'
-                } : 'Not available',
-                playerStats: detailsData.playerStats ? 'Available' : 'Not available',
-                releaseDate: detailsData.gameDetails?.releaseDate || 'Not available',
-                studio: detailsData.gameDetails?.studio || 'Not available',
-                genres: detailsData.gameDetails?.genres?.map(g => g.description).join(', ') || 'Not available'
-              }
-              console.log('📊 Detailed Steam Game Information:', gameInfo)
-            }
-          } catch (error) {
-            console.error('Error fetching game details:', error)
-          }
-          
-          // Get game image - Steam GetOwnedGames returns img_icon_url and img_logo_url
-          // Use library_600x900.jpg for high-quality box art (same as AddGameModal)
-          let imageUrl = ''
-          if (steamGame.appid) {
-            imageUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${steamGame.appid}/library_600x900.jpg`
-          }
-          
-          // Convert playtime from Steam API (minutes) to store in database
-          // Steam API returns playtime_forever in minutes
-          const timePlayedMinutes = steamGame.playtime_forever || 0
-          
-          // Get last played date from Steam API
-          // rtime_last_played is a Unix timestamp in seconds, or 0 if never played
-          let lastPlayedDate = null
-          if (steamGame.rtime_last_played && steamGame.rtime_last_played > 0) {
-            const lastPlayedTimestamp = steamGame.rtime_last_played * 1000 // Convert to milliseconds
-            const lastPlayed = new Date(lastPlayedTimestamp)
-            const now = new Date()
-            
-            // Validate the date is reasonable (not in the future, not too old - older than 5 years is suspicious)
-            const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000)
-            if (!isNaN(lastPlayed.getTime()) && lastPlayed <= now && lastPlayed >= fiveYearsAgo) {
-              lastPlayedDate = lastPlayed.toISOString()
-            }
-          }
-          
-          // Add to database
-          try {
-            const addResponse = await fetch(`${API_URL}/api/games`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                name: steamGame.name || 'Unknown Game',
-                image: imageUrl,
-                releaseDate: formattedReleaseDate,
-                studio: studioName,
-                steamAppId: String(steamGame.appid),
-                timePlayed: timePlayedMinutes,
-                lastPlayed: lastPlayedDate,
-                price: gamePrice, // Use current price from Steam (pricePaid not available via API)
-              }),
-            })
-
-            if (addResponse.ok) {
-              const gameData = await addResponse.json()
-              newGames.push(gameData.game)
-              addedCount++
-            } else if (addResponse.status === 409) {
-              skippedCount++
-            }
-          } catch (error) {
-            console.error(`Error adding game ${steamGame.name}:`, error)
           }
         }
+        
+        // Process games in parallel batches to speed up
+        const batchSize = 10
+        for (let i = 0; i < gamesToProcess.length; i += batchSize) {
+          const batch = gamesToProcess.slice(i, i + batchSize)
+          
+          // Process batch in parallel
+          await Promise.all(batch.map(async (steamGame) => {
+            // Fetch detailed game information
+            let studioName = 'Unknown Studio'
+            let formattedReleaseDate = ''
+            let gamePrice = null // Will store price if available
+            
+            try {
+              const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${steamGame.appid}`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+              })
+              
+              if (detailsResponse.ok) {
+                const detailsData = await detailsResponse.json()
+                
+                // Get studio from game details
+                if (detailsData.gameDetails?.studio) {
+                  studioName = detailsData.gameDetails.studio
+                }
+                
+                // Get and format release date from game details (timestamp in milliseconds)
+                if (detailsData.gameDetails?.releaseDate) {
+                  const releaseTimestamp = detailsData.gameDetails.releaseDate
+                  const releaseDate = new Date(releaseTimestamp)
+                  formattedReleaseDate = releaseDate.toLocaleDateString('en-US', {
+                    month: 'short',
+                    year: 'numeric'
+                  })
+                }
+                
+                // Get price from game details (current price)
+                // Note: Steam API doesn't expose purchase history, so we use current price
+                if (detailsData.gameDetails?.price?.final) {
+                  // Price is in cents, convert to dollars
+                  gamePrice = detailsData.gameDetails.price.final / 100
+                }
+                
+                // Log detailed game information
+                const gameInfo = {
+                  name: steamGame.name,
+                  appId: steamGame.appid,
+                  playtimeForever: steamGame.playtime_forever ? `${Math.round(steamGame.playtime_forever / 60)} hours` : '0 hours',
+                  playtimeForeverMinutes: steamGame.playtime_forever || 0,
+                  lastPlayed: steamGame.rtime_last_played ? new Date(steamGame.rtime_last_played * 1000).toISOString() : 'Never',
+                  currentPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.final / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
+                  originalPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.initial / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
+                  pricePaid: 'Not available via Steam API (Steam does not expose purchase history)',
+                  achievements: detailsData.achievements ? {
+                    total: detailsData.achievements.totalAchievements,
+                    unlocked: detailsData.achievements.unlockedAchievements,
+                    completionPercentage: `${Math.round(detailsData.achievements.completionPercentage)}%`,
+                    isCompleted: detailsData.achievements.isCompleted ? 'Yes' : 'No'
+                  } : 'Not available',
+                  playerStats: detailsData.playerStats ? 'Available' : 'Not available',
+                  releaseDate: detailsData.gameDetails?.releaseDate || 'Not available',
+                  studio: detailsData.gameDetails?.studio || 'Not available',
+                  genres: detailsData.gameDetails?.genres?.map(g => g.description).join(', ') || 'Not available'
+                }
+                console.log('📊 Detailed Steam Game Information:', gameInfo)
+              }
+            } catch (error) {
+              console.error('Error fetching game details:', error)
+            }
+            
+            // Get game image - Steam GetOwnedGames returns img_icon_url and img_logo_url
+            // Use library_600x900.jpg for high-quality box art (same as AddGameModal)
+            let imageUrl = ''
+            if (steamGame.appid) {
+              imageUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${steamGame.appid}/library_600x900.jpg`
+            }
+            
+            // Convert playtime from Steam API (minutes) to store in database
+            // Steam API returns playtime_forever in minutes
+            const timePlayedMinutes = steamGame.playtime_forever || 0
+            
+            // Get last played date from Steam API
+            // rtime_last_played is a Unix timestamp in seconds, or 0 if never played
+            let lastPlayedDate = null
+            if (steamGame.rtime_last_played && steamGame.rtime_last_played > 0) {
+              const lastPlayedTimestamp = steamGame.rtime_last_played * 1000 // Convert to milliseconds
+              const lastPlayed = new Date(lastPlayedTimestamp)
+              const now = new Date()
+              
+              // Validate the date is reasonable (not in the future, not too old - older than 5 years is suspicious)
+              const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000)
+              if (!isNaN(lastPlayed.getTime()) && lastPlayed <= now && lastPlayed >= fiveYearsAgo) {
+                lastPlayedDate = lastPlayed.toISOString()
+              }
+            }
+            
+            // Add to database
+            try {
+              const addResponse = await fetch(`${API_URL}/api/games`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  name: steamGame.name || 'Unknown Game',
+                  image: imageUrl,
+                  releaseDate: formattedReleaseDate,
+                  studio: studioName,
+                  steamAppId: String(steamGame.appid),
+                  timePlayed: timePlayedMinutes,
+                  lastPlayed: lastPlayedDate,
+                  price: gamePrice, // Use current price from Steam (pricePaid not available via API)
+                }),
+              })
+
+              if (addResponse.ok) {
+                const gameData = await addResponse.json()
+                newGames.push(gameData.game)
+                addedCount++
+              } else if (addResponse.status === 409) {
+                skippedCount++
+              }
+            } catch (error) {
+              console.error(`Error adding game ${steamGame.name}:`, error)
+            } finally {
+              processedCount++
+              updateProgressIfNeeded()
+            }
+          }))
+        }
+        
+        // Final progress update
+        setSyncProgress({ current: totalGames, total: totalGames, currentGame: 'Complete!' })
         
         // Update local state with new games (prepend to show most recent first)
         if (newGames.length > 0) {
@@ -1055,14 +1091,14 @@ function Dashboard() {
       {/* Mobile oscillating indicators - only show during sync */}
       {isSyncing && (
         <>
-          <div className="fixed top-0 left-0 right-0 h-2 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+          <div className="fixed top-0 left-0 right-0 h-1.5 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
             <div className="relative w-full h-full">
-              <div className="oscillate-indicator w-40 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
+              <div className="oscillate-indicator w-32 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
             </div>
           </div>
-          <div className="fixed bottom-0 left-0 right-0 h-2 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+          <div className="fixed bottom-0 left-0 right-0 h-1.5 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
             <div className="relative w-full h-full">
-              <div className="oscillate-indicator-reverse w-40 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
+              <div className="oscillate-indicator-reverse w-32 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
             </div>
           </div>
         </>

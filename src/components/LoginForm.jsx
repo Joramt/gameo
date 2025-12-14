@@ -24,8 +24,8 @@ function LoginForm({ onSwitchToSignup, onClose }) {
       console.log('Login result:', result)
       
       if (result.success) {
-        // Modal will close via onClose, redirect will happen via LandingPage useEffect
-        if (onClose) onClose()
+        // Don't close modal here - let LandingPage handle redirect naturally
+        // The modal will close when the redirect happens
       } else {
         setLocalError(result.error || 'Login failed')
       }
