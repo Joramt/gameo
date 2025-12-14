@@ -37,6 +37,28 @@ function Modal({ isOpen, onClose, children, title, preventClose = false }) {
         }
       }}
     >
+      {/* Close button for mobile - positioned at top left of screen */}
+      {!preventClose && (
+        <button
+          onClick={onClose}
+          className="md:hidden fixed top-4 left-4 text-gray-400 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-lg z-[60] bg-black/20 backdrop-blur-sm"
+          aria-label="Close modal"
+        >
+          <svg
+            className="w-6 h-6"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+      )}
       <div className="relative w-full h-full md:w-full md:max-w-md md:h-auto md:mx-4 md:max-h-[90vh] md:rounded-2xl overflow-y-auto">
         {/* Gradient border effect */}
         <div className="absolute inset-0 bg-gradient-to-r from-purple-500/40 via-pink-500/40 to-purple-500/40 md:rounded-2xl blur-xl opacity-40"></div>
@@ -53,13 +75,13 @@ function Modal({ isOpen, onClose, children, title, preventClose = false }) {
           
             {title && (
               <div className="flex items-center justify-between mb-8 relative z-10">
-                <h2 className="text-3xl font-bold text-white modal-title-shadow">
+                <h2 className="text-3xl font-bold text-white modal-title-shadow md:block text-center md:text-left">
                   {title}
                 </h2>
                 {!preventClose && (
                   <button
                     onClick={onClose}
-                    className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-white/5 rounded-lg"
+                    className="hidden md:block text-gray-400 hover:text-white transition-colors p-2 hover:bg-white/5 rounded-lg"
                     aria-label="Close modal"
                   >
                     <svg

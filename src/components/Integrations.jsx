@@ -217,7 +217,11 @@ function Integrations() {
           // Small delay to allow React to re-render and show progress
           await new Promise(resolve => setTimeout(resolve, 50))
           
-          // Fetch and log detailed game information
+          // Fetch detailed game information
+          let studioName = 'Unknown Studio'
+          let formattedReleaseDate = ''
+          let gamePrice = null // Will store price if available
+          
           try {
             const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${steamGame.appid}`, {
               headers: {
@@ -228,6 +232,30 @@ function Integrations() {
             
             if (detailsResponse.ok) {
               const detailsData = await detailsResponse.json()
+              
+              // Get studio from game details
+              if (detailsData.gameDetails?.studio) {
+                studioName = detailsData.gameDetails.studio
+              }
+              
+              // Get and format release date from game details (timestamp in milliseconds)
+              if (detailsData.gameDetails?.releaseDate) {
+                const releaseTimestamp = detailsData.gameDetails.releaseDate
+                const releaseDate = new Date(releaseTimestamp)
+                formattedReleaseDate = releaseDate.toLocaleDateString('en-US', {
+                  month: 'short',
+                  year: 'numeric'
+                })
+              }
+              
+              // Get price from game details (current price)
+              // Note: Steam API doesn't expose purchase history, so we use current price
+              if (detailsData.gameDetails?.price?.final) {
+                // Price is in cents, convert to dollars
+                gamePrice = detailsData.gameDetails.price.final / 100
+              }
+              
+              // Log detailed game information
               const gameInfo = {
                 name: steamGame.name,
                 appId: steamGame.appid,
@@ -254,16 +282,6 @@ function Integrations() {
             console.error('Error fetching game details:', error)
           }
           
-          // Format release date
-          let formattedReleaseDate = ''
-          if (steamGame.rtime_last_played && steamGame.rtime_last_played > 0) {
-            const date = new Date(steamGame.rtime_last_played * 1000)
-            formattedReleaseDate = date.toLocaleDateString('en-US', {
-              month: 'short',
-              year: 'numeric'
-            })
-          }
-          
           // Get game image
           let imageUrl = ''
           if (steamGame.appid) {
@@ -273,6 +291,21 @@ function Integrations() {
           // Convert playtime from Steam API (minutes) to store in database
           // Steam API returns playtime_forever in minutes
           const timePlayedMinutes = steamGame.playtime_forever || 0
+          
+          // Get last played date from Steam API
+          // rtime_last_played is a Unix timestamp in seconds, or 0 if never played
+          let lastPlayedDate = null
+          if (steamGame.rtime_last_played && steamGame.rtime_last_played > 0) {
+            const lastPlayedTimestamp = steamGame.rtime_last_played * 1000 // Convert to milliseconds
+            const lastPlayed = new Date(lastPlayedTimestamp)
+            const now = new Date()
+            
+            // Validate the date is reasonable (not in the future, not too old - older than 5 years is suspicious)
+            const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000)
+            if (!isNaN(lastPlayed.getTime()) && lastPlayed <= now && lastPlayed >= fiveYearsAgo) {
+              lastPlayedDate = lastPlayed.toISOString()
+            }
+          }
           
           // Add to database
           try {
@@ -286,9 +319,11 @@ function Integrations() {
                 name: steamGame.name || 'Unknown Game',
                 image: imageUrl,
                 releaseDate: formattedReleaseDate,
-                studio: 'Unknown Studio',
+                studio: studioName,
                 steamAppId: String(steamGame.appid),
                 timePlayed: timePlayedMinutes,
+                lastPlayed: lastPlayedDate,
+                price: gamePrice, // Use current price from Steam (pricePaid not available via API)
               }),
             })
 
@@ -396,7 +431,7 @@ function Integrations() {
             <div 
               className={`bg-blue-500/10 border border-blue-500/30 rounded-2xl mb-8 relative overflow-hidden transition-all duration-300 ease-in-out ${
                 showHowItWorks 
-                  ? 'opacity-100 max-h-[200px] p-6 mb-8' 
+                  ? 'opacity-100 max-h-[200px] p-6 pb-6 md:pb-6 mb-8' 
                   : 'opacity-0 max-h-0 p-0 mb-0 border-0'
               }`}
             >
@@ -409,13 +444,13 @@ function Integrations() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
-              <div className="flex items-start space-x-4 pr-8">
+              <div className="flex items-start space-x-4 pr-8 pb-0">
                 <svg className="w-6 h-6 text-blue-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <div>
+                <div className="pb-0">
                   <h4 className="text-blue-300 font-semibold mb-2">How it works</h4>
-                  <p className="text-gray-300 text-sm leading-relaxed">
+                  <p className="text-gray-300 text-sm leading-relaxed pb-0">
                     When you connect your Steam account, we'll securely sync your game library. 
                     Your login credentials are never stored - we use Steam's official authentication 
                     system to access your public game list.
@@ -567,14 +602,14 @@ function Integrations() {
       {isSyncing && (
         <>
           {/* Mobile oscillating indicators */}
-          <div className="fixed top-0 left-0 right-0 h-1 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+          <div className="fixed top-0 left-0 right-0 h-2 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
             <div className="relative w-full h-full">
-              <div className="oscillate-indicator w-20 h-full bg-gradient-to-r from-purple-500/50 via-pink-500/50 to-purple-500/50"></div>
+              <div className="oscillate-indicator w-40 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
             </div>
           </div>
-          <div className="fixed bottom-0 left-0 right-0 h-1 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+          <div className="fixed bottom-0 left-0 right-0 h-2 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
             <div className="relative w-full h-full">
-              <div className="oscillate-indicator-reverse w-20 h-full bg-gradient-to-r from-purple-500/50 via-pink-500/50 to-purple-500/50"></div>
+              <div className="oscillate-indicator-reverse w-40 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
             </div>
           </div>
         </>

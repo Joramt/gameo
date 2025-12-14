@@ -105,7 +105,7 @@ body {
     left: 0;
   }
   50% {
-    left: calc(100% - 5rem);
+    left: calc(100% - 10rem);
   }
   100% {
     left: 0;
@@ -114,24 +114,34 @@ body {
 
 @keyframes oscillate-reverse {
   0% {
-    left: calc(100% - 5rem);
+    left: calc(100% - 10rem);
   }
   50% {
     left: 0;
   }
   100% {
-    left: calc(100% - 5rem);
+    left: calc(100% - 10rem);
   }
 }
 
 .oscillate-indicator {
   position: absolute;
   animation: oscillate 2s ease-in-out infinite;
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.8), 
+              0 0 40px rgba(236, 72, 153, 0.6),
+              0 0 60px rgba(168, 85, 247, 0.4);
+  filter: drop-shadow(0 0 8px rgba(168, 85, 247, 1))
+          drop-shadow(0 0 12px rgba(236, 72, 153, 0.8));
 }
 
 .oscillate-indicator-reverse {
   position: absolute;
   animation: oscillate-reverse 2s ease-in-out infinite;
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.8), 
+              0 0 40px rgba(236, 72, 153, 0.6),
+              0 0 60px rgba(168, 85, 247, 0.4);
+  filter: drop-shadow(0 0 8px rgba(168, 85, 247, 1))
+          drop-shadow(0 0 12px rgba(236, 72, 153, 0.8));
 }
 
 /* Animated gradient background for modals */

@@ -16,17 +16,24 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const { data: games, error } = await supabase
       .from('user_games')
-      .select('id, name, image, release_date, studio, steam_app_id, date_started, date_bought, price, time_played, created_at, updated_at')
+      .select('id, name, image, release_date, studio, steam_app_id, date_started, date_bought, price, time_played, last_played, created_at, updated_at')
       .eq('user_id', req.userId)
-      .order('created_at', { ascending: false }) // Most recent first
+      .order('last_played', { ascending: false, nullsLast: true }) // Most recent first, nulls last
 
     if (error) {
       console.error('Error fetching games:', error)
       return res.status(500).json({ error: 'Failed to fetch games' })
     }
 
+    // Sort games: by last_played (descending), then by created_at (descending) for games without last_played
+    const sortedGames = (games || []).sort((a, b) => {
+      const aDate = a.last_played ? new Date(a.last_played) : (a.created_at ? new Date(a.created_at) : new Date(0))
+      const bDate = b.last_played ? new Date(b.last_played) : (b.created_at ? new Date(b.created_at) : new Date(0))
+      return bDate - aDate // Most recent first
+    })
+
     // Transform database format to frontend format
-    const formattedGames = (games || []).map(game => ({
+    const formattedGames = sortedGames.map(game => ({
       id: game.id,
       name: game.name,
       image: game.image || '',
@@ -37,6 +44,7 @@ router.get('/', authenticateToken, async (req, res) => {
       dateBought: game.date_bought || '',
       price: game.price ? parseFloat(game.price) : '',
       timePlayed: game.time_played || 0,
+      lastPlayed: game.last_played || null,
       createdAt: game.created_at || null,
     }))
 
@@ -53,7 +61,7 @@ router.get('/', authenticateToken, async (req, res) => {
  */
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { name, image, releaseDate, studio, steamAppId, dateStarted, dateBought, price, timePlayed } = req.body
+    const { name, image, releaseDate, studio, steamAppId, dateStarted, dateBought, price, timePlayed, lastPlayed } = req.body
 
     if (!name) {
       return res.status(400).json({ error: 'Game name is required' })
@@ -92,9 +100,10 @@ router.post('/', authenticateToken, async (req, res) => {
           date_bought: dateBought || null,
           price: price ? parseFloat(price) : null,
           time_played: timePlayed || 0,
+          last_played: lastPlayed || null,
         }
       ])
-      .select('id, name, image, release_date, studio, steam_app_id, date_started, date_bought, price, time_played, created_at, updated_at')
+      .select('id, name, image, release_date, studio, steam_app_id, date_started, date_bought, price, time_played, last_played, created_at, updated_at')
       .single()
 
     if (insertError) {
@@ -114,6 +123,7 @@ router.post('/', authenticateToken, async (req, res) => {
       dateBought: newGame.date_bought || '',
       price: newGame.price ? parseFloat(newGame.price) : '',
       timePlayed: newGame.time_played || 0,
+      lastPlayed: newGame.last_played || null,
       createdAt: newGame.created_at || null,
     }
 
@@ -131,7 +141,7 @@ router.post('/', authenticateToken, async (req, res) => {
 router.put('/:gameId', authenticateToken, async (req, res) => {
   try {
     const { gameId } = req.params
-    const { name, image, releaseDate, studio, steamAppId, dateStarted, dateBought, price, timePlayed } = req.body
+    const { name, image, releaseDate, studio, steamAppId, dateStarted, dateBought, price, timePlayed, lastPlayed } = req.body
 
     if (!supabase) {
       return res.status(500).json({ error: 'Server configuration error' })
@@ -147,6 +157,7 @@ router.put('/:gameId', authenticateToken, async (req, res) => {
     if (dateBought !== undefined) updateData.date_bought = dateBought && dateBought.trim() !== '' ? dateBought : null
     if (price !== undefined) updateData.price = price !== null && price !== '' && !isNaN(parseFloat(price)) ? parseFloat(price) : null
     if (timePlayed !== undefined) updateData.time_played = parseInt(timePlayed, 10) || 0
+    if (lastPlayed !== undefined) updateData.last_played = lastPlayed && lastPlayed.trim() !== '' ? lastPlayed : null
     updateData.updated_at = new Date().toISOString()
 
     const { data: updatedGame, error: updateError } = await supabase
@@ -154,7 +165,7 @@ router.put('/:gameId', authenticateToken, async (req, res) => {
       .update(updateData)
       .eq('id', gameId)
       .eq('user_id', req.userId) // Ensure user owns the game
-      .select('id, name, image, release_date, studio, steam_app_id, date_started, date_bought, price, time_played, created_at, updated_at')
+      .select('id, name, image, release_date, studio, steam_app_id, date_started, date_bought, price, time_played, last_played, created_at, updated_at')
       .single()
 
     if (updateError) {
@@ -177,6 +188,7 @@ router.put('/:gameId', authenticateToken, async (req, res) => {
       dateBought: updatedGame.date_bought || '',
       price: updatedGame.price ? parseFloat(updatedGame.price) : '',
       timePlayed: updatedGame.time_played || 0,
+      lastPlayed: updatedGame.last_played || null,
       createdAt: updatedGame.created_at || null,
     }
 

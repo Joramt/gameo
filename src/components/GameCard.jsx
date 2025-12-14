@@ -40,7 +40,7 @@ function GameCard({ game, onTimerClick, onCardClick, onRemove }) {
     setShowRemoveModal(false)
   }
 
-  // Format time played
+  // Format time played as hours and minutes (for back of card)
   const formatTimePlayed = (timePlayedMinutes) => {
     if (!timePlayedMinutes || timePlayedMinutes === 0) {
       return '0h'
@@ -48,6 +48,55 @@ function GameCard({ game, onTimerClick, onCardClick, onRemove }) {
     const hours = Math.floor(timePlayedMinutes / 60)
     const minutes = timePlayedMinutes % 60
     return `${hours}h ${ minutes != 0 ? minutes +'m' : ""}`
+  }
+
+  // Format time played as years, months, and days (for front of card)
+  // Assumes months alternate between 30 and 31 days
+  const formatTimePlayedSmart = (timePlayedMinutes) => {
+    if (!timePlayedMinutes || timePlayedMinutes === 0) {
+      return ''
+    }
+    
+    // Convert minutes to days
+    const totalMinutes = timePlayedMinutes
+    const hours = Math.floor(totalMinutes / 60)
+    const totalHours = hours
+    const daysFromHours = Math.floor(totalHours / 24)
+    
+    // Calculate years, months, and days
+    // Average month: 30.5 days (alternating 30/31)
+    let remainingDays = daysFromHours
+    const years = Math.floor(remainingDays / 365)
+    remainingDays = remainingDays % 365
+    
+    // Calculate months (using average of 30.5 days per month)
+    // To alternate 30/31, we'll use a simple approach: every other month is 31 days
+    let months = 0
+    let days = remainingDays
+    
+    // Simple approximation: use 30.5 as average
+    months = Math.floor(remainingDays / 30.5)
+    days = Math.round(remainingDays % 30.5)
+    
+    // If we have close to a month worth of days, round up
+    if (days >= 28 && months > 0) {
+      months++
+      days = 0
+    }
+    
+    // Build the string, only showing non-zero values
+    const parts = []
+    if (years > 0) {
+      parts.push(`${years} ${years === 1 ? 'year' : 'years'}`)
+    }
+    if (months > 0) {
+      parts.push(`${months} ${months === 1 ? 'month' : 'months'}`)
+    }
+    if (days > 0 || parts.length === 0) {
+      parts.push(`${days} ${days === 1 ? 'day' : 'days'}`)
+    }
+    
+    return parts.join(' ')
   }
 
   // Format date
@@ -59,6 +108,33 @@ function GameCard({ game, onTimerClick, onCardClick, onRemove }) {
       month: 'short', 
       day: 'numeric' 
     })
+  }
+
+  // Format last played date (short format)
+  const formatLastPlayed = (dateString) => {
+    if (!dateString) return null
+    const date = new Date(dateString)
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      year: date.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
+    })
+  }
+
+  // Check if last played is within the last month
+  const isLastPlayedRecent = (dateString) => {
+    if (!dateString) return false
+    
+    const lastPlayedDate = new Date(dateString)
+    const now = new Date()
+    
+    // Validate the date is reasonable (not invalid, not in the future, not too old)
+    if (isNaN(lastPlayedDate.getTime())) return false
+    if (lastPlayedDate > now) return false // Can't be in the future
+    if (lastPlayedDate < new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000)) return false // Older than 1 year is suspicious
+    
+    const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+    return lastPlayedDate >= oneMonthAgo
   }
 
   // Format price
@@ -142,11 +218,27 @@ function GameCard({ game, onTimerClick, onCardClick, onRemove }) {
               background: 'linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.5) 40%, rgba(0, 0, 0, 0.2) 70%, transparent 100%)',
               backdropFilter: 'blur(4px)'
             }}>
-              <h3 className="text-white text-xl md:text-base font-medium leading-tight" style={{
+              <h3 className="text-white text-xl md:text-base font-medium leading-tight mb-1" style={{
                 textShadow: '0 2px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(0, 0, 0, 0.5)'
               }}>
                 {game.name}
               </h3>
+              {/* Time Played - Smart Format */}
+              {game.timePlayed > 0 && (
+                <p className="text-white/90 text-sm md:text-xs font-medium mb-1" style={{
+                  textShadow: '0 2px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(0, 0, 0, 0.5)'
+                }}>
+                  {formatTimePlayedSmart(game.timePlayed)}
+                </p>
+              )}
+              {/* Last Played - Only show if within last month */}
+              {game.lastPlayed && isLastPlayedRecent(game.lastPlayed) && (
+                <p className="text-white/80 text-xs md:text-[10px] font-medium" style={{
+                  textShadow: '0 2px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(0, 0, 0, 0.5)'
+                }}>
+                  Last played {formatLastPlayed(game.lastPlayed)}
+                </p>
+              )}
             </div>
           </div>
         </div>

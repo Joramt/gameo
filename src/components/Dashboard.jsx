@@ -25,28 +25,35 @@ function Dashboard() {
     ).join(' ')
   }
 
-  // Helper function to categorize games by date
+  // Helper function to categorize games by last played date
   const categorizeGames = (games) => {
+    // Sort games by last_played (most recent first), fallback to created_at
+    const sortedGames = [...games].sort((a, b) => {
+      const aDate = a.lastPlayed ? new Date(a.lastPlayed) : (a.createdAt ? new Date(a.createdAt) : new Date(0))
+      const bDate = b.lastPlayed ? new Date(b.lastPlayed) : (b.createdAt ? new Date(b.createdAt) : new Date(0))
+      return bDate - aDate // Most recent first
+    })
+    
     const now = new Date()
     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
     const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
     
-    const lastWeek = games.filter(game => {
-      if (!game.createdAt) return false
-      const createdDate = new Date(game.createdAt)
-      return createdDate >= oneWeekAgo
+    const lastWeek = sortedGames.filter(game => {
+      const playDate = game.lastPlayed ? new Date(game.lastPlayed) : (game.createdAt ? new Date(game.createdAt) : null)
+      if (!playDate) return false
+      return playDate >= oneWeekAgo
     })
     
-    const lastMonth = games.filter(game => {
-      if (!game.createdAt) return false
-      const createdDate = new Date(game.createdAt)
-      return createdDate >= oneMonthAgo && createdDate < oneWeekAgo
+    const lastMonth = sortedGames.filter(game => {
+      const playDate = game.lastPlayed ? new Date(game.lastPlayed) : (game.createdAt ? new Date(game.createdAt) : null)
+      if (!playDate) return false
+      return playDate >= oneMonthAgo
     })
     
     setLastWeekGames(lastWeek)
     setLastMonthGames(lastMonth)
-    setAllGames(games)
-    setRecentGames(games) // Keep for compatibility
+    setAllGames(sortedGames)
+    setRecentGames(sortedGames) // Keep for compatibility
   }
 
   const [recentGames, setRecentGames] = useState([])
@@ -272,7 +279,11 @@ function Dashboard() {
           // Small delay to allow React to re-render and show progress
           await new Promise(resolve => setTimeout(resolve, 50))
           
-          // Fetch and log detailed game information
+          // Fetch detailed game information
+          let studioName = 'Unknown Studio'
+          let formattedReleaseDate = ''
+          let gamePrice = null // Will store price if available
+          
           try {
             const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${steamGame.appid}`, {
               headers: {
@@ -283,6 +294,30 @@ function Dashboard() {
             
             if (detailsResponse.ok) {
               const detailsData = await detailsResponse.json()
+              
+              // Get studio from game details
+              if (detailsData.gameDetails?.studio) {
+                studioName = detailsData.gameDetails.studio
+              }
+              
+              // Get and format release date from game details (timestamp in milliseconds)
+              if (detailsData.gameDetails?.releaseDate) {
+                const releaseTimestamp = detailsData.gameDetails.releaseDate
+                const releaseDate = new Date(releaseTimestamp)
+                formattedReleaseDate = releaseDate.toLocaleDateString('en-US', {
+                  month: 'short',
+                  year: 'numeric'
+                })
+              }
+              
+              // Get price from game details (current price)
+              // Note: Steam API doesn't expose purchase history, so we use current price
+              if (detailsData.gameDetails?.price?.final) {
+                // Price is in cents, convert to dollars
+                gamePrice = detailsData.gameDetails.price.final / 100
+              }
+              
+              // Log detailed game information
               const gameInfo = {
                 name: steamGame.name,
                 appId: steamGame.appid,
@@ -309,17 +344,6 @@ function Dashboard() {
             console.error('Error fetching game details:', error)
           }
           
-          // Format release date - Steam API doesn't provide release date in GetOwnedGames
-          // We'll leave it empty or use last played time if available
-          let formattedReleaseDate = ''
-          if (steamGame.rtime_last_played && steamGame.rtime_last_played > 0) {
-            const date = new Date(steamGame.rtime_last_played * 1000)
-            formattedReleaseDate = date.toLocaleDateString('en-US', {
-              month: 'short',
-              year: 'numeric'
-            })
-          }
-          
           // Get game image - Steam GetOwnedGames returns img_icon_url and img_logo_url
           // Use library_600x900.jpg for high-quality box art (same as AddGameModal)
           let imageUrl = ''
@@ -330,6 +354,21 @@ function Dashboard() {
           // Convert playtime from Steam API (minutes) to store in database
           // Steam API returns playtime_forever in minutes
           const timePlayedMinutes = steamGame.playtime_forever || 0
+          
+          // Get last played date from Steam API
+          // rtime_last_played is a Unix timestamp in seconds, or 0 if never played
+          let lastPlayedDate = null
+          if (steamGame.rtime_last_played && steamGame.rtime_last_played > 0) {
+            const lastPlayedTimestamp = steamGame.rtime_last_played * 1000 // Convert to milliseconds
+            const lastPlayed = new Date(lastPlayedTimestamp)
+            const now = new Date()
+            
+            // Validate the date is reasonable (not in the future, not too old - older than 5 years is suspicious)
+            const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000)
+            if (!isNaN(lastPlayed.getTime()) && lastPlayed <= now && lastPlayed >= fiveYearsAgo) {
+              lastPlayedDate = lastPlayed.toISOString()
+            }
+          }
           
           // Add to database
           try {
@@ -343,9 +382,11 @@ function Dashboard() {
                 name: steamGame.name || 'Unknown Game',
                 image: imageUrl,
                 releaseDate: formattedReleaseDate,
-                studio: 'Unknown Studio',
+                studio: studioName,
                 steamAppId: String(steamGame.appid),
                 timePlayed: timePlayedMinutes,
+                lastPlayed: lastPlayedDate,
+                price: gamePrice, // Use current price from Steam (pricePaid not available via API)
               }),
             })
 
@@ -803,13 +844,10 @@ function Dashboard() {
               {/* Last Week Games */}
               <div className="mb-8 md:mb-12">
                 <h2 className="text-xl md:text-2xl font-bold text-white mb-4">
-                  Added This Week
+                  Played This Week
                 </h2>
                 {lastWeekGames.length > 0 ? (
                   <div className="hidden md:flex gap-6 items-stretch">
-                    <div className="flex-shrink-0">
-                      <AddGameCard onClick={handleAddGame} />
-                    </div>
                     <div className="relative flex-1 min-w-0">
                       <div 
                         className="flex gap-6 overflow-x-auto pb-4" 
@@ -839,13 +877,10 @@ function Dashboard() {
               {/* Last Month Games (excluding last week) */}
               <div className="mb-8 md:mb-12">
                 <h2 className="text-xl md:text-2xl font-bold text-white mb-4">
-                  Added This Month
+                  Played This Month
                 </h2>
                 {lastMonthGames.length > 0 ? (
                   <div className="hidden md:flex gap-6 items-stretch">
-                    <div className="flex-shrink-0">
-                      <AddGameCard onClick={handleAddGame} />
-                    </div>
                     <div className="relative flex-1 min-w-0">
                       <div 
                         className="flex gap-6 overflow-x-auto pb-4" 
@@ -1020,14 +1055,14 @@ function Dashboard() {
       {/* Mobile oscillating indicators - only show during sync */}
       {isSyncing && (
         <>
-          <div className="fixed top-0 left-0 right-0 h-1 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+          <div className="fixed top-0 left-0 right-0 h-2 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
             <div className="relative w-full h-full">
-              <div className="oscillate-indicator w-20 h-full bg-gradient-to-r from-purple-500/50 via-pink-500/50 to-purple-500/50"></div>
+              <div className="oscillate-indicator w-40 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
             </div>
           </div>
-          <div className="fixed bottom-0 left-0 right-0 h-1 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+          <div className="fixed bottom-0 left-0 right-0 h-2 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
             <div className="relative w-full h-full">
-              <div className="oscillate-indicator-reverse w-20 h-full bg-gradient-to-r from-purple-500/50 via-pink-500/50 to-purple-500/50"></div>
+              <div className="oscillate-indicator-reverse w-40 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
             </div>
           </div>
         </>
