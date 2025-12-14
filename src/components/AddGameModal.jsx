@@ -262,8 +262,47 @@ function AddGameModal({ isOpen, onClose, onAddGame, library = [] }) {
     )
   }
 
-  const handleGameClick = (game) => {
+  const handleGameClick = async (game) => {
     if (!isGameInLibrary(game)) {
+      // Fetch and log detailed game information if it's a Steam game
+      if (game.steamAppId) {
+        try {
+          const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+          const token = localStorage.getItem('auth_token')
+          
+          const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${game.steamAppId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          })
+          
+          if (detailsResponse.ok) {
+            const detailsData = await detailsResponse.json()
+            const gameInfo = {
+              name: game.name,
+              appId: game.steamAppId,
+              currentPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.final / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
+              originalPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.initial / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
+              pricePaid: 'Not available via Steam API (Steam does not expose purchase history)',
+              achievements: detailsData.achievements ? {
+                total: detailsData.achievements.totalAchievements,
+                unlocked: detailsData.achievements.unlockedAchievements,
+                completionPercentage: `${Math.round(detailsData.achievements.completionPercentage)}%`,
+                isCompleted: detailsData.achievements.isCompleted ? 'Yes' : 'No'
+              } : 'Not available (user may not own this game yet)',
+              playerStats: detailsData.playerStats ? 'Available' : 'Not available',
+              releaseDate: detailsData.gameDetails?.releaseDate ? new Date(detailsData.gameDetails.releaseDate).toLocaleDateString() : 'Not available',
+              studio: detailsData.gameDetails?.studio || 'Not available',
+              genres: detailsData.gameDetails?.genres?.map(g => g.description).join(', ') || 'Not available'
+            }
+            console.log('📊 Detailed Steam Game Information:', gameInfo)
+          }
+        } catch (error) {
+          console.error('Error fetching game details:', error)
+        }
+      }
+      
       onAddGame(game)
     }
   }

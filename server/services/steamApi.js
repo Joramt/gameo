@@ -181,3 +181,94 @@ export async function getGameDetails(appIds) {
     */
 }
 
+/**
+ * Get player achievements for a specific game
+ * @param {string} steamId - Steam ID of the user
+ * @param {string} appId - Steam app ID
+ * @param {string} apiKey - Steam Web API key
+ * @returns {Promise<Object>} Achievement data
+ */
+export async function getPlayerAchievements(steamId, appId, apiKey) {
+  try {
+    const url = `http://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/?appid=${appId}&key=${apiKey}&steamid=${steamId}`
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Gameo/1.0 (Steam API Client)'
+      }
+    })
+
+    if (!response.ok) {
+      throw new Error(`Steam API returned ${response.status}: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    
+    if (!data || !data.playerstats) {
+      return null
+    }
+
+    const achievements = data.playerstats.achievements || []
+    const totalAchievements = achievements.length
+    const unlockedAchievements = achievements.filter(a => a.achieved === 1).length
+    const completionPercentage = totalAchievements > 0 ? (unlockedAchievements / totalAchievements) * 100 : 0
+
+    return {
+      gameName: data.playerstats.gameName,
+      totalAchievements,
+      unlockedAchievements,
+      completionPercentage,
+      isCompleted: totalAchievements > 0 && unlockedAchievements === totalAchievements,
+      achievements: achievements.map(a => ({
+        name: a.apiname,
+        achieved: a.achieved === 1,
+        unlockTime: a.unlocktime || null
+      }))
+    }
+  } catch (error) {
+    // Achievements might not be available for all games or users might have private profiles
+    console.error(`Error fetching achievements for app ${appId}:`, error.message)
+    return null
+  }
+}
+
+/**
+ * Get player stats for a specific game
+ * @param {string} steamId - Steam ID of the user
+ * @param {string} appId - Steam app ID
+ * @param {string} apiKey - Steam Web API key
+ * @returns {Promise<Object>} Player stats data
+ */
+export async function getPlayerStats(steamId, appId, apiKey) {
+  try {
+    const url = `http://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v0002/?appid=${appId}&key=${apiKey}&steamid=${steamId}`
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Gameo/1.0 (Steam API Client)'
+      }
+    })
+
+    if (!response.ok) {
+      throw new Error(`Steam API returned ${response.status}: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    
+    if (!data || !data.playerstats) {
+      return null
+    }
+
+    return {
+      steamID: data.playerstats.steamID,
+      gameName: data.playerstats.gameName,
+      stats: data.playerstats.stats || [],
+      achievements: data.playerstats.achievements || []
+    }
+  } catch (error) {
+    // Stats might not be available for all games
+    console.error(`Error fetching stats for app ${appId}:`, error.message)
+    return null
+  }
+}
+

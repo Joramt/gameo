@@ -68,6 +68,7 @@ function Dashboard() {
   const [isCheckingSteam, setIsCheckingSteam] = useState(true)
   const [steamConnected, setSteamConnected] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, currentGame: '' })
   const [showLeftFade, setShowLeftFade] = useState(false)
   const [showRightFade, setShowRightFade] = useState(true)
   const [syncSuccessModal, setSyncSuccessModal] = useState({ show: false, addedCount: 0, skippedCount: 0 })
@@ -233,16 +234,79 @@ function Dashboard() {
           existingSteamIds = new Set(existingData.games.map(g => g.steamAppId).filter(Boolean))
         }
         
+        // Filter out games that are already in library
+        const gamesToAdd = steamGames.filter(game => !existingSteamIds.has(String(game.appid)))
+        const totalGames = gamesToAdd.length
+        
+        // Set initial progress
+        setIsSyncing(true)
+        setSyncProgress({ current: 0, total: totalGames, currentGame: '' })
+        
+        // Wait a bit to let the modal render
+        await new Promise(resolve => setTimeout(resolve, 100))
+        
         // Transform Steam games and add to database
         const newGames = []
         let addedCount = 0
         let skippedCount = 0
+        let processedCount = 0
         
-        for (const steamGame of steamGames) {
+        for (let i = 0; i < steamGames.length; i++) {
+          const steamGame = steamGames[i]
+          
           // Skip if already in library
           if (existingSteamIds.has(String(steamGame.appid))) {
             skippedCount++
             continue
+          }
+          
+          processedCount++
+          
+          // Update progress - use a function to ensure state updates properly
+          setSyncProgress({ 
+            current: processedCount, 
+            total: totalGames, 
+            currentGame: steamGame.name || 'Unknown Game' 
+          })
+          
+          // Small delay to allow React to re-render and show progress
+          await new Promise(resolve => setTimeout(resolve, 50))
+          
+          // Fetch and log detailed game information
+          try {
+            const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${steamGame.appid}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+            })
+            
+            if (detailsResponse.ok) {
+              const detailsData = await detailsResponse.json()
+              const gameInfo = {
+                name: steamGame.name,
+                appId: steamGame.appid,
+                playtimeForever: steamGame.playtime_forever ? `${Math.round(steamGame.playtime_forever / 60)} hours` : '0 hours',
+                playtimeForeverMinutes: steamGame.playtime_forever || 0,
+                lastPlayed: steamGame.rtime_last_played ? new Date(steamGame.rtime_last_played * 1000).toISOString() : 'Never',
+                currentPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.final / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
+                originalPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.initial / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
+                pricePaid: 'Not available via Steam API (Steam does not expose purchase history)',
+                achievements: detailsData.achievements ? {
+                  total: detailsData.achievements.totalAchievements,
+                  unlocked: detailsData.achievements.unlockedAchievements,
+                  completionPercentage: `${Math.round(detailsData.achievements.completionPercentage)}%`,
+                  isCompleted: detailsData.achievements.isCompleted ? 'Yes' : 'No'
+                } : 'Not available',
+                playerStats: detailsData.playerStats ? 'Available' : 'Not available',
+                releaseDate: detailsData.gameDetails?.releaseDate || 'Not available',
+                studio: detailsData.gameDetails?.studio || 'Not available',
+                genres: detailsData.gameDetails?.genres?.map(g => g.description).join(', ') || 'Not available'
+              }
+              console.log('📊 Detailed Steam Game Information:', gameInfo)
+            }
+          } catch (error) {
+            console.error('Error fetching game details:', error)
           }
           
           // Format release date - Steam API doesn't provide release date in GetOwnedGames
@@ -354,6 +418,7 @@ function Dashboard() {
       setErrorModal({ show: true, message: 'An error occurred while syncing your Steam library. Please try again.' })
     } finally {
       setIsSyncing(false)
+      setSyncProgress({ current: 0, total: 0, currentGame: '' })
     }
   }
 
@@ -477,6 +542,42 @@ function Dashboard() {
       }
 
       const token = localStorage.getItem('auth_token')
+      
+      // Fetch and log detailed game information if it's a Steam game
+      if (gameData.steamAppId) {
+        try {
+          const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${gameData.steamAppId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          })
+          
+          if (detailsResponse.ok) {
+            const detailsData = await detailsResponse.json()
+            const gameInfo = {
+              name: gameData.name,
+              appId: gameData.steamAppId,
+              currentPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.final / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
+              originalPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.initial / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
+              pricePaid: 'Not available via Steam API (Steam does not expose purchase history)',
+              achievements: detailsData.achievements ? {
+                total: detailsData.achievements.totalAchievements,
+                unlocked: detailsData.achievements.unlockedAchievements,
+                completionPercentage: `${Math.round(detailsData.achievements.completionPercentage)}%`,
+                isCompleted: detailsData.achievements.isCompleted ? 'Yes' : 'No'
+              } : 'Not available (user may not own this game yet)',
+              playerStats: detailsData.playerStats ? 'Available' : 'Not available',
+              releaseDate: detailsData.gameDetails?.releaseDate ? new Date(detailsData.gameDetails.releaseDate).toLocaleDateString() : 'Not available',
+              studio: detailsData.gameDetails?.studio || 'Not available',
+              genres: detailsData.gameDetails?.genres?.map(g => g.description).join(', ') || 'Not available'
+            }
+            console.log('📊 Detailed Steam Game Information:', gameInfo)
+          }
+        } catch (error) {
+          console.error('Error fetching game details:', error)
+        }
+      }
       const response = await fetch(`${API_URL}/api/games`, {
         method: 'POST',
         headers: {

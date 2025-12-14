@@ -15,6 +15,7 @@ function Integrations() {
   const [steamConnected, setSteamConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, currentGame: '' })
   const [connections, setConnections] = useState([])
   const [message, setMessage] = useState(null)
   const [showHowItWorks, setShowHowItWorks] = useState(true)
@@ -179,15 +180,78 @@ function Integrations() {
           existingSteamIds = new Set(existingData.games.map(g => g.steamAppId).filter(Boolean))
         }
         
+        // Filter out games that are already in library
+        const gamesToAdd = steamGames.filter(game => !existingSteamIds.has(String(game.appid)))
+        const totalGames = gamesToAdd.length
+        
+        // Set initial progress
+        setIsSyncing(true)
+        setSyncProgress({ current: 0, total: totalGames, currentGame: '' })
+        
+        // Wait a bit to let the modal render
+        await new Promise(resolve => setTimeout(resolve, 100))
+        
         // Transform Steam games and add to database
         let addedCount = 0
         let skippedCount = 0
+        let processedCount = 0
         
-        for (const steamGame of steamGames) {
+        for (let i = 0; i < steamGames.length; i++) {
+          const steamGame = steamGames[i]
+          
           // Skip if already in library
           if (existingSteamIds.has(String(steamGame.appid))) {
             skippedCount++
             continue
+          }
+          
+          processedCount++
+          
+          // Update progress - use a function to ensure state updates properly
+          setSyncProgress({ 
+            current: processedCount, 
+            total: totalGames, 
+            currentGame: steamGame.name || 'Unknown Game' 
+          })
+          
+          // Small delay to allow React to re-render and show progress
+          await new Promise(resolve => setTimeout(resolve, 50))
+          
+          // Fetch and log detailed game information
+          try {
+            const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${steamGame.appid}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+            })
+            
+            if (detailsResponse.ok) {
+              const detailsData = await detailsResponse.json()
+              const gameInfo = {
+                name: steamGame.name,
+                appId: steamGame.appid,
+                playtimeForever: steamGame.playtime_forever ? `${Math.round(steamGame.playtime_forever / 60)} hours` : '0 hours',
+                playtimeForeverMinutes: steamGame.playtime_forever || 0,
+                lastPlayed: steamGame.rtime_last_played ? new Date(steamGame.rtime_last_played * 1000).toISOString() : 'Never',
+                currentPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.final / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
+                originalPrice: detailsData.gameDetails?.price ? `$${(detailsData.gameDetails.price.initial / 100).toFixed(2)} ${detailsData.gameDetails.price.currency || 'USD'}` : 'Not available',
+                pricePaid: 'Not available via Steam API (Steam does not expose purchase history)',
+                achievements: detailsData.achievements ? {
+                  total: detailsData.achievements.totalAchievements,
+                  unlocked: detailsData.achievements.unlockedAchievements,
+                  completionPercentage: `${Math.round(detailsData.achievements.completionPercentage)}%`,
+                  isCompleted: detailsData.achievements.isCompleted ? 'Yes' : 'No'
+                } : 'Not available',
+                playerStats: detailsData.playerStats ? 'Available' : 'Not available',
+                releaseDate: detailsData.gameDetails?.releaseDate || 'Not available',
+                studio: detailsData.gameDetails?.studio || 'Not available',
+                genres: detailsData.gameDetails?.genres?.map(g => g.description).join(', ') || 'Not available'
+              }
+              console.log('📊 Detailed Steam Game Information:', gameInfo)
+            }
+          } catch (error) {
+            console.error('Error fetching game details:', error)
           }
           
           // Format release date
@@ -262,6 +326,7 @@ function Integrations() {
       setErrorModal({ show: true, message: 'An error occurred while syncing your Steam library. Please try again.' })
     } finally {
       setIsSyncing(false)
+      setSyncProgress({ current: 0, total: 0, currentGame: '' })
     }
   }
 
@@ -353,7 +418,6 @@ function Integrations() {
                 </div>
               </div>
             </div>
-            )}
           </div>
 
           {/* Success/Error Messages */}
@@ -494,9 +558,48 @@ function Integrations() {
         </div>
       </div>
 
+      {/* Sync Progress Modal */}
+      <Modal
+        isOpen={isSyncing}
+        onClose={() => {}} // Don't allow closing during sync
+        title="Syncing Your Steam Library"
+      >
+        <div className="space-y-6">
+          <div>
+            <p className="text-gray-300 mb-4">
+              {syncProgress.total > 0 
+                ? `Importing game ${syncProgress.current} of ${syncProgress.total}`
+                : 'Preparing to sync your games...'}
+            </p>
+            {syncProgress.currentGame && (
+              <p className="text-gray-400 text-sm mb-4">
+                Currently importing: <span className="text-purple-300 font-medium">{syncProgress.currentGame}</span>
+              </p>
+            )}
+            
+            {/* Progress Bar */}
+            <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+              <div 
+                className="bg-gradient-to-r from-purple-500 to-pink-500 h-full transition-all duration-300 ease-out"
+                style={{ 
+                  width: syncProgress.total > 0 
+                    ? `${(syncProgress.current / syncProgress.total) * 100}%` 
+                    : '0%' 
+                }}
+              />
+            </div>
+            <p className="text-gray-500 text-xs text-center mt-2">
+              {syncProgress.total > 0 
+                ? `${Math.round((syncProgress.current / syncProgress.total) * 100)}% complete`
+                : 'Initializing...'}
+            </p>
+          </div>
+        </div>
+      </Modal>
+
       {/* Sync Success Modal */}
       <Modal
-        isOpen={syncSuccessModal.show}
+        isOpen={syncSuccessModal.show && !isSyncing}
         onClose={() => setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })}
         title="Sync Complete"
       >

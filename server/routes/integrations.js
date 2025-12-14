@@ -351,5 +351,60 @@ router.get('/steam/library', authenticateToken, async (req, res) => {
   }
 })
 
+/**
+ * GET /api/integrations/steam/game-details/:appId
+ * Fetch detailed information about a specific game from Steam
+ */
+router.get('/steam/game-details/:appId', authenticateToken, async (req, res) => {
+  try {
+    const { appId } = req.params
+
+    if (!supabase) {
+      return res.status(500).json({ error: 'Server configuration error' })
+    }
+
+    // Get user's Steam connection
+    const { data: connection, error: connectionError } = await supabase
+      .from('user_integrations')
+      .select('external_id')
+      .eq('user_id', req.userId)
+      .eq('service', 'steam')
+      .single()
+
+    if (connectionError || !connection) {
+      return res.status(404).json({ error: 'Steam account not connected' })
+    }
+
+    const steamId = connection.external_id
+
+    if (!STEAM_API_KEY) {
+      return res.status(500).json({ error: 'Steam API key not configured' })
+    }
+
+    // Import the Steam API functions
+    const { getPlayerAchievements, getPlayerStats } = await import('../services/steamApi.js')
+    const { getGameDetails } = await import('../services/steamApi.js')
+
+    // Fetch all available data in parallel
+    const [gameDetails, achievements, playerStats] = await Promise.all([
+      getGameDetails([appId]).catch(() => ({ games: {} })),
+      getPlayerAchievements(steamId, appId, STEAM_API_KEY).catch(() => null),
+      getPlayerStats(steamId, appId, STEAM_API_KEY).catch(() => null)
+    ])
+
+    const gameData = gameDetails.games?.[appId] || null
+
+    res.json({
+      appId,
+      gameDetails: gameData,
+      achievements,
+      playerStats
+    })
+  } catch (error) {
+    console.error('Get Steam game details error:', error)
+    res.status(500).json({ error: 'An error occurred' })
+  }
+})
+
 export { router as integrationsRouter }
 
