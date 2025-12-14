@@ -222,6 +222,57 @@ router.get('/steam/callback', async (req, res) => {
 })
 
 /**
+ * POST /api/integrations/steam/sync-complete
+ * Mark Steam sync as complete (stores sync status in metadata)
+ */
+router.post('/steam/sync-complete', authenticateToken, async (req, res) => {
+  try {
+    const { addedCount, skippedCount } = req.body
+
+    if (!supabase) {
+      return res.status(500).json({ error: 'Server configuration error' })
+    }
+
+    // Update Steam integration metadata to mark as synced
+    const { data: connection, error: fetchError } = await supabase
+      .from('user_integrations')
+      .select('id, metadata')
+      .eq('user_id', req.userId)
+      .eq('service', 'steam')
+      .single()
+
+    if (fetchError || !connection) {
+      return res.status(404).json({ error: 'Steam account not connected' })
+    }
+
+    // Update metadata with sync information
+    const metadata = connection.metadata || {}
+    metadata.synced = true
+    metadata.synced_at = new Date().toISOString()
+    if (addedCount !== undefined) metadata.last_sync_added = addedCount
+    if (skippedCount !== undefined) metadata.last_sync_skipped = skippedCount
+
+    const { error: updateError } = await supabase
+      .from('user_integrations')
+      .update({
+        metadata,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', connection.id)
+
+    if (updateError) {
+      console.error('Error updating sync status:', updateError)
+      return res.status(500).json({ error: 'Failed to update sync status' })
+    }
+
+    res.json({ message: 'Sync status updated successfully' })
+  } catch (error) {
+    console.error('Sync complete error:', error)
+    res.status(500).json({ error: 'An error occurred' })
+  }
+})
+
+/**
  * DELETE /api/integrations/:service
  * Disconnect a service
  */

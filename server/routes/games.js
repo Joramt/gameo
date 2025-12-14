@@ -137,14 +137,14 @@ router.put('/:gameId', authenticateToken, async (req, res) => {
 
     const updateData = {}
     if (name !== undefined) updateData.name = name
-    if (image !== undefined) updateData.image = image
-    if (releaseDate !== undefined) updateData.release_date = releaseDate
-    if (studio !== undefined) updateData.studio = studio
-    if (steamAppId !== undefined) updateData.steam_app_id = steamAppId
-    if (dateStarted !== undefined) updateData.date_started = dateStarted
-    if (dateBought !== undefined) updateData.date_bought = dateBought
-    if (price !== undefined) updateData.price = price ? parseFloat(price) : null
-    if (timePlayed !== undefined) updateData.time_played = timePlayed
+    if (image !== undefined) updateData.image = image || null
+    if (releaseDate !== undefined) updateData.release_date = releaseDate && releaseDate.trim() !== '' ? releaseDate : null
+    if (studio !== undefined) updateData.studio = studio && studio.trim() !== '' ? studio : null
+    if (steamAppId !== undefined) updateData.steam_app_id = steamAppId && steamAppId.toString().trim() !== '' ? steamAppId : null
+    if (dateStarted !== undefined) updateData.date_started = dateStarted && dateStarted.trim() !== '' ? dateStarted : null
+    if (dateBought !== undefined) updateData.date_bought = dateBought && dateBought.trim() !== '' ? dateBought : null
+    if (price !== undefined) updateData.price = price !== null && price !== '' && !isNaN(parseFloat(price)) ? parseFloat(price) : null
+    if (timePlayed !== undefined) updateData.time_played = parseInt(timePlayed, 10) || 0
     updateData.updated_at = new Date().toISOString()
 
     const { data: updatedGame, error: updateError } = await supabase

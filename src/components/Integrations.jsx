@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import Modal from './Modal'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -14,6 +15,12 @@ function Integrations() {
   const [connections, setConnections] = useState([])
   const [message, setMessage] = useState(null)
   const [showHowItWorks, setShowHowItWorks] = useState(true)
+  const [isSteamSynchronized, setIsSteamSynchronized] = useState(false)
+  const [syncSuccessModal, setSyncSuccessModal] = useState({ show: false, addedCount: 0, skippedCount: 0 })
+  const [syncCounts, setSyncCounts] = useState({ addedCount: 0, skippedCount: 0 })
+  const [errorModal, setErrorModal] = useState({ show: false, message: '' })
+  const [isLoadingConnections, setIsLoadingConnections] = useState(true)
+  const [steamHasSynced, setSteamHasSynced] = useState(false)
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -24,6 +31,11 @@ function Integrations() {
   useEffect(() => {
     if (isAuthenticated) {
       fetchConnections()
+    }
+    
+    // Reset sync state when component unmounts (leaving page)
+    return () => {
+      setIsSteamSynchronized(false)
     }
   }, [isAuthenticated])
 
@@ -44,6 +56,7 @@ function Integrations() {
 
   const fetchConnections = async () => {
     try {
+      setIsLoadingConnections(true)
       const token = localStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/integrations`, {
         headers: {
@@ -56,10 +69,30 @@ function Integrations() {
         const data = await response.json()
         setConnections(data.connections || [])
         const steamConnection = data.connections?.find(c => c.service === 'steam')
-        setSteamConnected(!!steamConnection)
+        const connected = !!steamConnection
+        setSteamConnected(connected)
+        
+        // Check if Steam has been synced before (from metadata)
+        if (steamConnection?.metadata?.synced) {
+          setSteamHasSynced(true)
+          // Restore last sync counts if available
+          if (steamConnection.metadata.last_sync_added !== undefined) {
+            setSyncCounts({ 
+              addedCount: steamConnection.metadata.last_sync_added || 0, 
+              skippedCount: steamConnection.metadata.last_sync_skipped || 0 
+            })
+          }
+        } else {
+          setSteamHasSynced(false)
+        }
+        
+        // Reset session sync state on mount
+        setIsSteamSynchronized(false)
       }
     } catch (error) {
       console.error('Error fetching connections:', error)
+    } finally {
+      setIsLoadingConnections(false)
     }
   }
 
@@ -197,18 +230,33 @@ function Integrations() {
           }
         }
         
-        if (addedCount > 0) {
-          alert(`Successfully synced ${addedCount} games from Steam${skippedCount > 0 ? ` (${skippedCount} already in library)` : ''}`)
-        } else {
-          alert('All games are already in your library')
+        // Mark sync as complete in database
+        const syncCompleteResponse = await fetch(`${API_URL}/api/integrations/steam/sync-complete`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ addedCount, skippedCount }),
+        })
+
+        if (syncCompleteResponse.ok) {
+          // Refresh connections to get updated metadata
+          await fetchConnections()
         }
+
+        setIsSteamSynchronized(true)
+        // Store sync counts in state for showing in modal when clicking "Synchronized" button
+        setSyncCounts({ addedCount, skippedCount })
+        setSyncSuccessModal({ show: true, addedCount, skippedCount })
+        setSteamHasSynced(true)
       } else {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
-        alert(`Failed to sync Steam library: ${errorData.error || 'Unknown error'}`)
+        setErrorModal({ show: true, message: `Failed to sync Steam library: ${errorData.error || 'Unknown error'}` })
       }
     } catch (error) {
       console.error('Error syncing Steam library:', error)
-      alert('An error occurred while syncing your Steam library. Please try again.')
+      setErrorModal({ show: true, message: 'An error occurred while syncing your Steam library. Please try again.' })
     } finally {
       setIsSyncing(false)
     }
@@ -395,7 +443,12 @@ function Integrations() {
 
                       {/* Action Buttons - Connect/Disconnect and Synchronize */}
                       <div className="flex items-center gap-2">
-                        {service.connected ? (
+                        {isLoadingConnections ? (
+                          // Show loading state to prevent flickering
+                          <div className="px-4 py-2 bg-gray-700/50 text-gray-400 rounded-lg text-sm font-medium">
+                            Loading...
+                          </div>
+                        ) : service.connected ? (
                           <button
                             onClick={() => handleDisconnect(service.id)}
                             className="px-4 py-2 bg-gray-700/50 hover:bg-gray-700 text-white rounded-lg transition-colors text-sm font-medium"
@@ -412,13 +465,13 @@ function Integrations() {
                           </button>
                         )}
 
-                        {/* Sync Button - Always visible for Steam, disabled if not connected */}
-                        {service.id === 'steam' && (
+                        {/* Sync Button - Always visible for Steam, disabled if not connected or already synced */}
+                        {service.id === 'steam' && !isSteamSynchronized && (
                           <button
                             onClick={handleSteamSync}
-                            disabled={isSyncing || !service.connected}
+                            disabled={isSyncing || !service.connected || isLoadingConnections}
                             className={`px-4 py-2 text-white rounded-lg transition-all transform text-sm font-medium flex items-center justify-center space-x-2 shadow-lg ${
-                              !service.connected || isSyncing
+                              !service.connected || isSyncing || isLoadingConnections
                                 ? 'bg-gray-700/80 opacity-50 cursor-not-allowed'
                                 : `bg-gradient-to-r ${service.color} hover:scale-105`
                             }`}
@@ -441,6 +494,18 @@ function Integrations() {
                             )}
                           </button>
                         )}
+                        {/* Synchronized Button - Shows after successful sync in current session */}
+                        {service.id === 'steam' && isSteamSynchronized && (
+                          <button
+                            onClick={() => setSyncSuccessModal({ show: true, addedCount: syncCounts.addedCount, skippedCount: syncCounts.skippedCount })}
+                            className="px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg transition-all transform hover:scale-105 text-sm font-medium flex items-center justify-center space-x-2 shadow-lg fade-in-slide"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                            <span>Synchronized</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -451,6 +516,64 @@ function Integrations() {
 
         </div>
       </div>
+
+      {/* Sync Success Modal */}
+      <Modal
+        isOpen={syncSuccessModal.show}
+        onClose={() => setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })}
+        title="Sync Complete"
+      >
+        <div className="space-y-4">
+          {syncSuccessModal.addedCount > 0 ? (
+            <p className="text-gray-300">
+              Successfully synced {syncSuccessModal.addedCount} {syncSuccessModal.addedCount === 1 ? 'game' : 'games'} from Steam
+              {syncSuccessModal.skippedCount > 0 && (
+                <span className="text-gray-400"> ({syncSuccessModal.skippedCount} already in library)</span>
+              )}
+            </p>
+          ) : (
+            <p className="text-gray-300">
+              All games are already in your library
+            </p>
+          )}
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })}
+              className="px-6 py-2 bg-gray-700/50 hover:bg-gray-700 text-white font-semibold rounded-xl transition-all"
+            >
+              OK
+            </button>
+            <button
+              onClick={() => {
+                setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })
+                navigate('/dashboard')
+              }}
+              className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-[1.02] shadow-lg shadow-purple-500/25"
+            >
+              Return to Dashboard
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Error Modal */}
+      <Modal
+        isOpen={errorModal.show}
+        onClose={() => setErrorModal({ show: false, message: '' })}
+        title="Error"
+      >
+        <div className="space-y-4">
+          <p className="text-gray-300">{errorModal.message}</p>
+          <div className="flex justify-end">
+            <button
+              onClick={() => setErrorModal({ show: false, message: '' })}
+              className="px-6 py-2 bg-gray-700/50 hover:bg-gray-700 text-white font-medium rounded-xl transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

@@ -33,6 +33,11 @@ function Dashboard() {
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showLeftFade, setShowLeftFade] = useState(false)
   const [showRightFade, setShowRightFade] = useState(true)
+  const [syncSuccessModal, setSyncSuccessModal] = useState({ show: false, addedCount: 0, skippedCount: 0 })
+  const [errorModal, setErrorModal] = useState({ show: false, message: '' })
+  const [addGameErrorModal, setAddGameErrorModal] = useState({ show: false, message: '' })
+  const [removeGameErrorModal, setRemoveGameErrorModal] = useState({ show: false, message: '' })
+  const [gameAlreadyInLibraryModal, setGameAlreadyInLibraryModal] = useState(false)
 
   // Get user ID
   const userId = user?.id
@@ -57,12 +62,14 @@ function Dashboard() {
           const connected = !!steamConnection
           setSteamConnected(connected)
 
-          // Check if user has already accepted sync (check localStorage)
-          const hasAcceptedSync = localStorage.getItem(`steam_sync_accepted_${userId}`) === 'true'
-          
-          // Show modal if Steam is connected and user hasn't accepted sync yet
-          if (connected && !hasAcceptedSync) {
-            setShowSteamSyncModal(true)
+          // Check if Steam has been synced before (check metadata)
+          if (connected && userId) {
+            const hasSynced = steamConnection?.metadata?.synced === true
+            
+            // Show modal if Steam is connected but hasn't been synced yet
+            if (!hasSynced) {
+              setShowSteamSyncModal(true)
+            }
           }
         }
       } catch (error) {
@@ -264,23 +271,50 @@ function Dashboard() {
           }, 100)
         }
         
-        // Mark as accepted
-        localStorage.setItem(`steam_sync_accepted_${userId}`, 'true')
+        // Mark sync as complete in database
+        const syncCompleteResponse = await fetch(`${API_URL}/api/integrations/steam/sync-complete`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ addedCount, skippedCount }),
+        })
+
+        if (syncCompleteResponse.ok) {
+          // Refresh Steam connection status to get updated metadata
+          const connectionsResponse = await fetch(`${API_URL}/api/integrations`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          })
+          if (connectionsResponse.ok) {
+            // This will update the state and prevent modal from showing again
+            const connectionsData = await connectionsResponse.json()
+            const steamConnection = connectionsData.connections?.find(c => c.service === 'steam')
+            if (steamConnection?.metadata?.synced) {
+              setShowSteamSyncModal(false)
+            }
+          }
+        }
+        
+        // Close sync modal
         setShowSteamSyncModal(false)
         
         if (addedCount > 0) {
-          console.log(`Successfully synced ${addedCount} games from Steam${skippedCount > 0 ? ` (${skippedCount} already in library)` : ''}`)
+          setSyncSuccessModal({ show: true, addedCount, skippedCount })
         } else {
-          console.log('All games are already in your library')
+          setSyncSuccessModal({ show: true, addedCount: 0, skippedCount: 0 })
         }
       } else {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
         console.error('Failed to fetch Steam library:', errorData.error)
-        alert(`Failed to sync Steam library: ${errorData.error || 'Unknown error'}`)
+        setErrorModal({ show: true, message: `Failed to sync Steam library: ${errorData.error || 'Unknown error'}` })
       }
     } catch (error) {
       console.error('Error syncing Steam library:', error)
-      alert('An error occurred while syncing your Steam library. Please try again.')
+      setErrorModal({ show: true, message: 'An error occurred while syncing your Steam library. Please try again.' })
     } finally {
       setIsSyncing(false)
     }
@@ -296,35 +330,66 @@ function Dashboard() {
     
     try {
       const token = localStorage.getItem('auth_token')
+      
+      // Ensure timePlayed is an integer and handle empty date strings
+      const updatePayload = {
+        name: gameInfo.name,
+        image: gameInfo.image,
+        releaseDate: gameInfo.releaseDate || null,
+        studio: gameInfo.studio || null,
+        steamAppId: gameInfo.steamAppId || null,
+        dateStarted: gameInfo.dateStarted && gameInfo.dateStarted.trim() !== '' ? gameInfo.dateStarted : null,
+        dateBought: gameInfo.dateBought && gameInfo.dateBought.trim() !== '' ? gameInfo.dateBought : null,
+        price: gameInfo.price && gameInfo.price !== '' ? parseFloat(gameInfo.price) : null,
+        timePlayed: parseInt(gameInfo.timePlayed, 10) || 0,
+      }
+      
+      console.log('Saving game info:', updatePayload)
+      
       const response = await fetch(`${API_URL}/api/games/${gameInfo.id}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          name: gameInfo.name,
-          image: gameInfo.image,
-          releaseDate: gameInfo.releaseDate,
-          studio: gameInfo.studio,
-          steamAppId: gameInfo.steamAppId,
-          dateStarted: gameInfo.dateStarted,
-          dateBought: gameInfo.dateBought,
-          price: gameInfo.price,
-          timePlayed: gameInfo.timePlayed,
-        }),
+        body: JSON.stringify(updatePayload),
       })
 
       if (response.ok) {
         const data = await response.json()
+        console.log('Game updated successfully:', data.game)
+        
         // Update local state
         setRecentGames(prevGames =>
           prevGames.map(game =>
             game.id === gameInfo.id ? data.game : game
           )
         )
+        // Reset time-only mode after successful save
+        setIsTimeOnlyMode(false)
+        
+        // Reload games from database to ensure we have the latest data
+        const gamesResponse = await fetch(`${API_URL}/api/games`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        })
+        
+        if (gamesResponse.ok) {
+          const gamesData = await gamesResponse.json()
+          const updatedGame = gamesData.games?.find(g => g.id === gameInfo.id)
+          if (updatedGame) {
+            setRecentGames(prevGames =>
+              prevGames.map(game =>
+                game.id === gameInfo.id ? updatedGame : game
+              )
+            )
+          }
+        }
       } else {
-        console.error('Failed to update game')
+        const errorData = await response.json().catch(() => ({ error: 'Failed to update game' }))
+        console.error('Failed to update game:', errorData.error || 'Unknown error')
       }
     } catch (error) {
       console.error('Error saving game info:', error)
@@ -349,11 +414,11 @@ function Dashboard() {
         setRecentGames(prevGames => prevGames.filter(g => g.id !== game.id))
       } else {
         console.error('Failed to remove game')
-        alert('Failed to remove game. Please try again.')
+        setRemoveGameErrorModal({ show: true, message: 'Failed to remove game. Please try again.' })
       }
     } catch (error) {
       console.error('Error removing game:', error)
-      alert('An error occurred while removing the game. Please try again.')
+      setRemoveGameErrorModal({ show: true, message: 'An error occurred while removing the game. Please try again.' })
     }
   }
 
@@ -422,14 +487,14 @@ function Dashboard() {
       } else {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
         if (response.status === 409) {
-          alert('This game is already in your library')
+          setGameAlreadyInLibraryModal(true)
         } else {
-          alert(`Failed to add game: ${errorData.error || 'Unknown error'}`)
+          setAddGameErrorModal({ show: true, message: `Failed to add game: ${errorData.error || 'Unknown error'}` })
         }
       }
     } catch (error) {
       console.error('Error adding game to library:', error)
-      alert('An error occurred while adding the game. Please try again.')
+      setAddGameErrorModal({ show: true, message: 'An error occurred while adding the game. Please try again.' })
     }
   }
 
@@ -803,6 +868,118 @@ function Dashboard() {
               className="px-6 py-3 bg-gray-700/50 hover:bg-gray-700 text-white font-medium rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Not Now
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Steam Sync Success Modal */}
+      <Modal
+        isOpen={syncSuccessModal.show}
+        onClose={() => setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })}
+        title="Sync Complete"
+      >
+        <div className="space-y-4">
+          {syncSuccessModal.addedCount > 0 ? (
+            <p className="text-gray-300">
+              Successfully synced {syncSuccessModal.addedCount} {syncSuccessModal.addedCount === 1 ? 'game' : 'games'} from Steam
+              {syncSuccessModal.skippedCount > 0 && (
+                <span className="text-gray-400"> ({syncSuccessModal.skippedCount} already in library)</span>
+              )}
+            </p>
+          ) : (
+            <p className="text-gray-300">
+              All games are already in your library
+            </p>
+          )}
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })}
+              className="px-6 py-2 bg-gray-700/50 hover:bg-gray-700 text-white font-semibold rounded-xl transition-all"
+            >
+              OK
+            </button>
+            <button
+              onClick={() => setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })}
+              className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-[1.02] shadow-lg shadow-purple-500/25"
+            >
+              Return to Dashboard
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Error Modal */}
+      <Modal
+        isOpen={errorModal.show}
+        onClose={() => setErrorModal({ show: false, message: '' })}
+        title="Error"
+      >
+        <div className="space-y-4">
+          <p className="text-gray-300">{errorModal.message}</p>
+          <div className="flex justify-end">
+            <button
+              onClick={() => setErrorModal({ show: false, message: '' })}
+              className="px-6 py-2 bg-gray-700/50 hover:bg-gray-700 text-white font-medium rounded-xl transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Add Game Error Modal */}
+      <Modal
+        isOpen={addGameErrorModal.show}
+        onClose={() => setAddGameErrorModal({ show: false, message: '' })}
+        title="Error"
+      >
+        <div className="space-y-4">
+          <p className="text-gray-300">{addGameErrorModal.message}</p>
+          <div className="flex justify-end">
+            <button
+              onClick={() => setAddGameErrorModal({ show: false, message: '' })}
+              className="px-6 py-2 bg-gray-700/50 hover:bg-gray-700 text-white font-medium rounded-xl transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Remove Game Error Modal */}
+      <Modal
+        isOpen={removeGameErrorModal.show}
+        onClose={() => setRemoveGameErrorModal({ show: false, message: '' })}
+        title="Error"
+      >
+        <div className="space-y-4">
+          <p className="text-gray-300">{removeGameErrorModal.message}</p>
+          <div className="flex justify-end">
+            <button
+              onClick={() => setRemoveGameErrorModal({ show: false, message: '' })}
+              className="px-6 py-2 bg-gray-700/50 hover:bg-gray-700 text-white font-medium rounded-xl transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Game Already in Library Modal */}
+      <Modal
+        isOpen={gameAlreadyInLibraryModal}
+        onClose={() => setGameAlreadyInLibraryModal(false)}
+        title="Game Already in Library"
+      >
+        <div className="space-y-4">
+          <p className="text-gray-300">This game is already in your library</p>
+          <div className="flex justify-end">
+            <button
+              onClick={() => setGameAlreadyInLibraryModal(false)}
+              className="px-6 py-2 bg-gray-700/50 hover:bg-gray-700 text-white font-medium rounded-xl transition-colors"
+            >
+              OK
             </button>
           </div>
         </div>
