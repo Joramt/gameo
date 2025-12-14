@@ -16,7 +16,7 @@ function Integrations() {
   const [isConnecting, setIsConnecting] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, currentGame: '' })
-  const [syncLog, setSyncLog] = useState([]) // Array of { gameName, status: 'syncing' | 'synced' | 'skipped' }
+  const [syncLog, setSyncLog] = useState([]) // Array of { gameName, status: 'syncing' | 'synced' | 'skipped', displayedName: string }
   const syncLogContainerRef = useRef(null)
   
   // Auto-scroll log to bottom when new items are added
@@ -236,22 +236,30 @@ function Integrations() {
           }
         }
         
-        // Process games in parallel batches to speed up
-        const batchSize = 10
-        for (let i = 0; i < gamesToProcess.length; i += batchSize) {
-          const batch = gamesToProcess.slice(i, i + batchSize)
+        // Process games one by one with typewriter effect
+        for (let i = 0; i < gamesToProcess.length; i++) {
+          const steamGame = gamesToProcess[i]
+          const gameName = steamGame.name || 'Unknown Game'
           
-          // Add games to log one by one (sequential display)
-          for (const steamGame of batch) {
-            const gameName = steamGame.name || 'Unknown Game'
-            setSyncLog(prev => [...prev, { gameName, status: 'syncing' }])
-            // Small delay to make them appear one by one
-            await new Promise(resolve => setTimeout(resolve, 50))
+          // Add game to log with typewriter effect
+          setSyncLog(prev => [...prev, { gameName, status: 'syncing', displayedName: '' }])
+          
+          // Typewriter effect - type out game name character by character
+          const fullName = gameName
+          for (let j = 0; j <= fullName.length; j++) {
+            await new Promise(resolve => setTimeout(resolve, 30)) // 30ms per character
+            setSyncLog(prev => {
+              const newLog = [...prev]
+              const lastIndex = newLog.length - 1
+              if (newLog[lastIndex] && newLog[lastIndex].gameName === gameName) {
+                newLog[lastIndex] = { ...newLog[lastIndex], displayedName: fullName.substring(0, j) }
+              }
+              return newLog
+            })
           }
           
-          // Process batch in parallel (but logs already added sequentially)
-          await Promise.all(batch.map(async (steamGame) => {
-            const gameName = steamGame.name || 'Unknown Game'
+          // Start processing this game (don't wait for it to finish before showing next)
+          const processGame = async () => {
             
             // Fetch detailed game information
             let studioName = 'Unknown Studio'
@@ -392,7 +400,13 @@ function Integrations() {
               processedCount++
               updateProgressIfNeeded()
             }
-          }))
+          }
+          
+          // Start processing in background (don't await - process all games in parallel)
+          processGame()
+          
+          // Small delay before showing next game
+          await new Promise(resolve => setTimeout(resolve, 100))
         }
         
         // Final progress update

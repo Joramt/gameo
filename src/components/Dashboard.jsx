@@ -89,7 +89,7 @@ function Dashboard() {
   const [steamConnected, setSteamConnected] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, currentGame: '' })
-  const [syncLog, setSyncLog] = useState([]) // Array of { gameName, status: 'syncing' | 'synced' | 'skipped' }
+  const [syncLog, setSyncLog] = useState([]) // Array of { gameName, status: 'syncing' | 'synced' | 'skipped', displayedName: string }
   const syncLogContainerRef = useRef(null)
   
   // Auto-scroll log to bottom when new items are added
@@ -311,24 +311,30 @@ function Dashboard() {
           }
         }
         
-        // Process games in parallel batches to speed up
-        const batchSize = 10
-        for (let i = 0; i < gamesToProcess.length; i += batchSize) {
-          const batch = gamesToProcess.slice(i, i + batchSize)
+        // Process games one by one with typewriter effect
+        for (let i = 0; i < gamesToProcess.length; i++) {
+          const steamGame = gamesToProcess[i]
+          const gameName = steamGame.name || 'Unknown Game'
           
-          // Add games to log one by one (sequential display)
-          for (const steamGame of batch) {
-            const gameName = steamGame.name || 'Unknown Game'
-            setSyncLog(prev => [...prev, { gameName, status: 'syncing' }])
-            // Small delay to make them appear one by one
-            await new Promise(resolve => setTimeout(resolve, 50))
+          // Add game to log with typewriter effect
+          setSyncLog(prev => [...prev, { gameName, status: 'syncing', displayedName: '' }])
+          
+          // Typewriter effect - type out game name character by character
+          const fullName = gameName
+          for (let j = 0; j <= fullName.length; j++) {
+            await new Promise(resolve => setTimeout(resolve, 30)) // 30ms per character
+            setSyncLog(prev => {
+              const newLog = [...prev]
+              const lastIndex = newLog.length - 1
+              if (newLog[lastIndex] && newLog[lastIndex].gameName === gameName) {
+                newLog[lastIndex] = { ...newLog[lastIndex], displayedName: fullName.substring(0, j) }
+              }
+              return newLog
+            })
           }
           
-          // Process batch in parallel (but logs already added sequentially)
-          await Promise.all(batch.map(async (steamGame) => {
-            const gameName = steamGame.name || 'Unknown Game'
-            
-            // Fetch detailed game information
+          // Start processing this game (don't wait for it to finish before showing next)
+          const processGame = async () => {
             let studioName = 'Unknown Studio'
             let formattedReleaseDate = ''
             let gamePrice = null // Will store price if available
@@ -470,7 +476,13 @@ function Dashboard() {
               processedCount++
               updateProgressIfNeeded()
             }
-          }))
+          }
+          
+          // Start processing in background (don't await - process all games in parallel)
+          processGame()
+          
+          // Small delay before showing next game
+          await new Promise(resolve => setTimeout(resolve, 100))
         }
         
         // Final progress update
@@ -1183,11 +1195,16 @@ function Dashboard() {
                   style={{ scrollBehavior: 'smooth' }}
                 >
                   {syncLog.map((logItem, index) => {
+                    // Use displayedName for typewriter effect, fallback to gameName
+                    const displayedGameName = logItem.displayedName !== undefined 
+                      ? logItem.displayedName 
+                      : logItem.gameName
+                    
                     // Calculate dots to fill space - aim for ~50 chars total
                     const maxGameNameLength = 30
-                    const gameNameDisplay = logItem.gameName.length > maxGameNameLength 
-                      ? logItem.gameName.substring(0, maxGameNameLength - 3) + '...'
-                      : logItem.gameName
+                    const gameNameDisplay = displayedGameName.length > maxGameNameLength 
+                      ? displayedGameName.substring(0, maxGameNameLength - 3) + '...'
+                      : displayedGameName
                     const availableWidth = 45
                     const dotsCount = Math.max(2, availableWidth - gameNameDisplay.length - (logItem.status === 'synced' ? 6 : logItem.status === 'skipped' ? 7 : 9))
                     const dots = '.'.repeat(dotsCount)
@@ -1205,7 +1222,12 @@ function Dashboard() {
                     
                     return (
                       <div key={index} className="text-gray-300 whitespace-nowrap flex items-center">
-                        <span className="text-purple-300">{gameNameDisplay}</span>
+                        <span className="text-purple-300">
+                          {gameNameDisplay}
+                          {logItem.displayedName !== undefined && logItem.displayedName.length < logItem.gameName.length && (
+                            <span className="animate-pulse">|</span>
+                          )}
+                        </span>
                         <span className="text-gray-600 flex-1">{dots}</span>
                         <span className={statusColor}>{statusText}</span>
                       </div>
