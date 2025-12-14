@@ -564,10 +564,26 @@ function Integrations() {
       </div>
 
       {/* Sync Progress Modal */}
+      {isSyncing && (
+        <>
+          {/* Mobile oscillating indicators */}
+          <div className="fixed top-0 left-0 right-0 h-1 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+            <div className="relative w-full h-full">
+              <div className="oscillate-indicator w-20 h-full bg-gradient-to-r from-purple-500/50 via-pink-500/50 to-purple-500/50"></div>
+            </div>
+          </div>
+          <div className="fixed bottom-0 left-0 right-0 h-1 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+            <div className="relative w-full h-full">
+              <div className="oscillate-indicator-reverse w-20 h-full bg-gradient-to-r from-purple-500/50 via-pink-500/50 to-purple-500/50"></div>
+            </div>
+          </div>
+        </>
+      )}
       <Modal
         isOpen={isSyncing}
         onClose={() => {}} // Don't allow closing during sync
         title="Syncing Your Steam Library"
+        preventClose={true}
       >
         <div className="space-y-6">
           <div>

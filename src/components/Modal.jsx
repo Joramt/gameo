@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-function Modal({ isOpen, onClose, children, title }) {
+function Modal({ isOpen, onClose, children, title, preventClose = false }) {
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden'
@@ -14,6 +14,8 @@ function Modal({ isOpen, onClose, children, title }) {
   }, [isOpen])
 
   useEffect(() => {
+    if (preventClose) return // Don't add escape handler if modal can't be closed
+    
     const handleEscape = (e) => {
       if (e.key === 'Escape' && isOpen) {
         onClose()
@@ -22,7 +24,7 @@ function Modal({ isOpen, onClose, children, title }) {
 
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
-  }, [isOpen, onClose])
+  }, [isOpen, onClose, preventClose])
 
   if (!isOpen) return null
 
@@ -30,7 +32,7 @@ function Modal({ isOpen, onClose, children, title }) {
     <div
       className="fixed inset-0 z-50 flex items-center justify-center md:items-start md:pt-20 md:pt-32 bg-black/60 backdrop-blur-md"
       onClick={(e) => {
-        if (e.target === e.currentTarget) {
+        if (e.target === e.currentTarget && !preventClose) {
           onClose()
         }
       }}
@@ -54,25 +56,27 @@ function Modal({ isOpen, onClose, children, title }) {
                 <h2 className="text-3xl font-bold text-white modal-title-shadow">
                   {title}
                 </h2>
-                <button
-                  onClick={onClose}
-                  className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-white/5 rounded-lg"
-                  aria-label="Close modal"
-                >
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+                {!preventClose && (
+                  <button
+                    onClick={onClose}
+                    className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-white/5 rounded-lg"
+                    aria-label="Close modal"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                )}
               </div>
             )}
             <div className="relative z-10">

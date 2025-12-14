@@ -99,6 +99,41 @@ body {
   animation: fadeInSlide 0.3s ease-in-out;
 }
 
+/* Oscillating indicator animation for mobile sync */
+@keyframes oscillate {
+  0% {
+    left: 0;
+  }
+  50% {
+    left: calc(100% - 5rem);
+  }
+  100% {
+    left: 0;
+  }
+}
+
+@keyframes oscillate-reverse {
+  0% {
+    left: calc(100% - 5rem);
+  }
+  50% {
+    left: 0;
+  }
+  100% {
+    left: calc(100% - 5rem);
+  }
+}
+
+.oscillate-indicator {
+  position: absolute;
+  animation: oscillate 2s ease-in-out infinite;
+}
+
+.oscillate-indicator-reverse {
+  position: absolute;
+  animation: oscillate-reverse 2s ease-in-out infinite;
+}
+
 /* Animated gradient background for modals */
 @keyframes gradientShift {
   0% {

@@ -435,6 +435,37 @@ function Dashboard() {
   const handleSaveGameInfo = async (gameInfo) => {
     if (!userId) return
     
+    const timePlayedValue = parseInt(gameInfo.timePlayed, 10) || 0
+    
+    // Update UI immediately with optimistic update
+    setAllGames(prevGames => {
+      const updatedGames = prevGames.map(game => {
+        if (game.id === gameInfo.id) {
+          return {
+            ...game,
+            name: gameInfo.name || game.name,
+            image: gameInfo.image || game.image,
+            releaseDate: gameInfo.releaseDate || game.releaseDate,
+            studio: gameInfo.studio || game.studio,
+            steamAppId: gameInfo.steamAppId || game.steamAppId,
+            dateStarted: gameInfo.dateStarted && gameInfo.dateStarted.trim() !== '' ? gameInfo.dateStarted : game.dateStarted,
+            dateBought: gameInfo.dateBought && gameInfo.dateBought.trim() !== '' ? gameInfo.dateBought : game.dateBought,
+            price: gameInfo.price && gameInfo.price !== '' ? parseFloat(gameInfo.price) : game.price,
+            timePlayed: timePlayedValue,
+          }
+        }
+        return game
+      })
+      categorizeGames(updatedGames)
+      return updatedGames
+    })
+    
+    // Close modal immediately
+    setIsGameInfoModalOpen(false)
+    setSelectedGame(null)
+    setIsTimeOnlyMode(false)
+    
+    // Process database update in background
     try {
       const token = localStorage.getItem('auth_token')
       
@@ -448,7 +479,7 @@ function Dashboard() {
         dateStarted: gameInfo.dateStarted && gameInfo.dateStarted.trim() !== '' ? gameInfo.dateStarted : null,
         dateBought: gameInfo.dateBought && gameInfo.dateBought.trim() !== '' ? gameInfo.dateBought : null,
         price: gameInfo.price && gameInfo.price !== '' ? parseFloat(gameInfo.price) : null,
-        timePlayed: parseInt(gameInfo.timePlayed, 10) || 0,
+        timePlayed: timePlayedValue,
       }
       
       console.log('Saving game info:', updatePayload)
@@ -464,9 +495,25 @@ function Dashboard() {
 
       if (response.ok) {
         const data = await response.json()
-        console.log('Game updated successfully:', data.game)
+        console.log('Game updated successfully in database:', data.game)
         
-        // Reload games from database to ensure we have the latest data
+        // Sync with database response (in case there were any server-side changes)
+        setAllGames(prevGames => {
+          const updatedGames = prevGames.map(game =>
+            game.id === gameInfo.id ? {
+              ...game,
+              ...data.game,
+              timePlayed: data.game.timePlayed || timePlayedValue
+            } : game
+          )
+          categorizeGames(updatedGames)
+          return updatedGames
+        })
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to update game' }))
+        console.error('Failed to update game in database:', errorData.error || 'Unknown error')
+        
+        // On error, revert to previous state by reloading from database
         const gamesResponse = await fetch(`${API_URL}/api/games`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -477,21 +524,28 @@ function Dashboard() {
         if (gamesResponse.ok) {
           const gamesData = await gamesResponse.json()
           categorizeGames(gamesData.games || [])
-        } else {
-          // Fallback: update local state if reload fails
-          const updatedGames = allGames.map(game =>
-            game.id === gameInfo.id ? data.game : game
-          )
-          categorizeGames(updatedGames)
         }
-        // Reset time-only mode after successful save
-        setIsTimeOnlyMode(false)
-      } else {
-        const errorData = await response.json().catch(() => ({ error: 'Failed to update game' }))
-        console.error('Failed to update game:', errorData.error || 'Unknown error')
       }
     } catch (error) {
-      console.error('Error saving game info:', error)
+      console.error('Error saving game info to database:', error)
+      
+      // On error, revert by reloading from database
+      try {
+        const token = localStorage.getItem('auth_token')
+        const gamesResponse = await fetch(`${API_URL}/api/games`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        })
+        
+        if (gamesResponse.ok) {
+          const gamesData = await gamesResponse.json()
+          categorizeGames(gamesData.games || [])
+        }
+      } catch (reloadError) {
+        console.error('Error reloading games:', reloadError)
+      }
     }
   }
 
@@ -963,9 +1017,65 @@ function Dashboard() {
         isTimeOnly={isTimeOnlyMode}
       />
 
+      {/* Mobile oscillating indicators - only show during sync */}
+      {isSyncing && (
+        <>
+          <div className="fixed top-0 left-0 right-0 h-1 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+            <div className="relative w-full h-full">
+              <div className="oscillate-indicator w-20 h-full bg-gradient-to-r from-purple-500/50 via-pink-500/50 to-purple-500/50"></div>
+            </div>
+          </div>
+          <div className="fixed bottom-0 left-0 right-0 h-1 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+            <div className="relative w-full h-full">
+              <div className="oscillate-indicator-reverse w-20 h-full bg-gradient-to-r from-purple-500/50 via-pink-500/50 to-purple-500/50"></div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Steam Sync Progress Modal */}
+      <Modal
+        isOpen={isSyncing}
+        onClose={() => {}}
+        title="Syncing Your Steam Library"
+        preventClose={true}
+      >
+        <div className="space-y-6">
+          <div>
+            <p className="text-gray-300 mb-4">
+              {syncProgress.total > 0 
+                ? `Importing game ${syncProgress.current} of ${syncProgress.total}`
+                : 'Preparing to sync your games...'}
+            </p>
+            {syncProgress.currentGame && (
+              <p className="text-gray-400 text-sm mb-4">
+                Currently importing: <span className="text-purple-300 font-medium">{syncProgress.currentGame}</span>
+              </p>
+            )}
+            
+            {/* Progress Bar */}
+            <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+              <div 
+                className="bg-gradient-to-r from-purple-500 to-pink-500 h-full transition-all duration-300 ease-out"
+                style={{ 
+                  width: syncProgress.total > 0 
+                    ? `${(syncProgress.current / syncProgress.total) * 100}%` 
+                    : '0%' 
+                }}
+              />
+            </div>
+            <p className="text-gray-500 text-xs text-center mt-2">
+              {syncProgress.total > 0 
+                ? `${Math.round((syncProgress.current / syncProgress.total) * 100)}% complete`
+                : 'Initializing...'}
+            </p>
+          </div>
+        </div>
+      </Modal>
+
       {/* Steam Sync Modal */}
       <Modal
-        isOpen={showSteamSyncModal && !isCheckingSteam}
+        isOpen={showSteamSyncModal && !isCheckingSteam && !isSyncing}
         onClose={handleDismissSteamSync}
         title="Sync Your Steam Library"
       >
