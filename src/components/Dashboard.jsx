@@ -89,6 +89,15 @@ function Dashboard() {
   const [steamConnected, setSteamConnected] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, currentGame: '' })
+  const [syncLog, setSyncLog] = useState([]) // Array of { gameName, status: 'syncing' | 'synced' | 'skipped' }
+  const syncLogContainerRef = useRef(null)
+  
+  // Auto-scroll log to bottom when new items are added
+  useEffect(() => {
+    if (syncLogContainerRef.current) {
+      syncLogContainerRef.current.scrollTop = syncLogContainerRef.current.scrollHeight
+    }
+  }, [syncLog])
   const [showLeftFade, setShowLeftFade] = useState(false)
   const [showRightFade, setShowRightFade] = useState(true)
   const [syncSuccessModal, setSyncSuccessModal] = useState({ show: false, addedCount: 0, skippedCount: 0 })
@@ -261,6 +270,7 @@ function Dashboard() {
         // Set initial progress
         setIsSyncing(true)
         setSyncProgress({ current: 0, total: totalGames, currentGame: '' })
+        setSyncLog([]) // Clear previous log
         
         // Transform Steam games and add to database
         const newGames = []
@@ -308,6 +318,10 @@ function Dashboard() {
           
           // Process batch in parallel
           await Promise.all(batch.map(async (steamGame) => {
+            // Add to log as syncing
+            const gameName = steamGame.name || 'Unknown Game'
+            setSyncLog(prev => [...prev, { gameName, status: 'syncing' }])
+            
             // Fetch detailed game information
             let studioName = 'Unknown Studio'
             let formattedReleaseDate = ''
@@ -423,11 +437,44 @@ function Dashboard() {
                 const gameData = await addResponse.json()
                 newGames.push(gameData.game)
                 addedCount++
+                // Update log status to synced
+                setSyncLog(prev => {
+                  const newLog = [...prev]
+                  for (let i = newLog.length - 1; i >= 0; i--) {
+                    if (newLog[i].gameName === gameName && newLog[i].status === 'syncing') {
+                      newLog[i] = { ...newLog[i], status: 'synced' }
+                      break
+                    }
+                  }
+                  return newLog
+                })
               } else if (addResponse.status === 409) {
                 skippedCount++
+                // Update log status to skipped
+                setSyncLog(prev => {
+                  const newLog = [...prev]
+                  for (let i = newLog.length - 1; i >= 0; i--) {
+                    if (newLog[i].gameName === gameName && newLog[i].status === 'syncing') {
+                      newLog[i] = { ...newLog[i], status: 'skipped' }
+                      break
+                    }
+                  }
+                  return newLog
+                })
               }
             } catch (error) {
               console.error(`Error adding game ${steamGame.name}:`, error)
+              // Update log status to skipped on error
+              setSyncLog(prev => {
+                const newLog = [...prev]
+                for (let i = newLog.length - 1; i >= 0; i--) {
+                  if (newLog[i].gameName === gameName && newLog[i].status === 'syncing') {
+                    newLog[i] = { ...newLog[i], status: 'skipped' }
+                    break
+                  }
+                }
+                return newLog
+              })
             } finally {
               processedCount++
               updateProgressIfNeeded()
@@ -1118,14 +1165,8 @@ function Dashboard() {
                 ? `Importing game ${syncProgress.current} of ${syncProgress.total}`
                 : 'Preparing to sync your games...'}
             </p>
-            {syncProgress.currentGame && (
-              <p className="text-gray-400 text-sm mb-4">
-                Currently importing: <span className="text-purple-300 font-medium">{syncProgress.currentGame}</span>
-              </p>
-            )}
-            
             {/* Progress Bar */}
-            <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+            <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden mb-4">
               <div 
                 className="bg-gradient-to-r from-purple-500 to-pink-500 h-full transition-all duration-300 ease-out"
                 style={{ 
@@ -1135,11 +1176,53 @@ function Dashboard() {
                 }}
               />
             </div>
-            <p className="text-gray-500 text-xs text-center mt-2">
+            <p className="text-gray-500 text-xs text-center mb-4">
               {syncProgress.total > 0 
                 ? `${Math.round((syncProgress.current / syncProgress.total) * 100)}% complete`
                 : 'Initializing...'}
             </p>
+            
+            {/* Console-like log */}
+            {syncLog.length > 0 && (
+              <div className="w-full bg-gray-900/80 border border-gray-700 rounded-lg p-4">
+                <div className="text-xs text-gray-400 mb-2 font-mono">Sync Log:</div>
+                <div 
+                  ref={syncLogContainerRef}
+                  className="h-48 overflow-y-auto font-mono text-xs space-y-1 hide-scrollbar"
+                  style={{ scrollBehavior: 'smooth' }}
+                >
+                  {syncLog.map((logItem, index) => {
+                    // Calculate dots to fill space - aim for ~50 chars total
+                    const maxGameNameLength = 30
+                    const gameNameDisplay = logItem.gameName.length > maxGameNameLength 
+                      ? logItem.gameName.substring(0, maxGameNameLength - 3) + '...'
+                      : logItem.gameName
+                    const availableWidth = 45
+                    const dotsCount = Math.max(2, availableWidth - gameNameDisplay.length - (logItem.status === 'synced' ? 6 : logItem.status === 'skipped' ? 7 : 9))
+                    const dots = '.'.repeat(dotsCount)
+                    
+                    const statusColor = logItem.status === 'synced' 
+                      ? 'text-green-400' 
+                      : logItem.status === 'skipped' 
+                        ? 'text-yellow-400' 
+                        : 'text-gray-400'
+                    const statusText = logItem.status === 'synced' 
+                      ? 'SYNCED' 
+                      : logItem.status === 'skipped' 
+                        ? 'SKIPPED' 
+                        : 'SYNCING...'
+                    
+                    return (
+                      <div key={index} className="text-gray-300 whitespace-nowrap flex items-center">
+                        <span className="text-purple-300">{gameNameDisplay}</span>
+                        <span className="text-gray-600 flex-1">{dots}</span>
+                        <span className={statusColor}>{statusText}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </Modal>
