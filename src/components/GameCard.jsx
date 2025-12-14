@@ -166,7 +166,7 @@ function GameCard({ game, onTimerClick, onCardClick, onRemove }) {
               <button
                 onClick={handleRemoveClick}
                 className="remove-icon absolute rounded-md bg-white hover:bg-gray-100 transition-colors w-6 h-6 flex items-center justify-center"
-                style={{ top: 0, right: 0 }}
+                style={{ top: '3px', right: 0 }}
                 aria-label="Remove game"
               >
                 <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

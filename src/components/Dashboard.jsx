@@ -548,7 +548,10 @@ function Dashboard() {
               Welcome back, {user?.name?.split(' ')[0] || 'Gamer'}! 🎮
             </h1>
             <p className="text-gray-400 text-sm md:text-base" id="games-description">
-              Here are your recently added games
+              Games{' '}
+              <span className="text-gray-500 text-xs md:text-sm">
+                ({recentGames.length})
+              </span>
             </p>
           </div>
 
