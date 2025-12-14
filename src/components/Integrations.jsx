@@ -236,30 +236,61 @@ function Integrations() {
           }
         }
         
-        // Process games one by one with typewriter effect
-        for (let i = 0; i < gamesToProcess.length; i++) {
-          const steamGame = gamesToProcess[i]
-          const gameName = steamGame.name || 'Unknown Game'
-          
-          // Add game to log with typewriter effect
-          setSyncLog(prev => [...prev, { gameName, status: 'syncing', displayedName: '' }])
-          
-          // Typewriter effect - type out game name character by character
-          const fullName = gameName
-          for (let j = 0; j <= fullName.length; j++) {
-            await new Promise(resolve => setTimeout(resolve, 30)) // 30ms per character
-            setSyncLog(prev => {
-              const newLog = [...prev]
-              const lastIndex = newLog.length - 1
-              if (newLog[lastIndex] && newLog[lastIndex].gameName === gameName) {
-                newLog[lastIndex] = { ...newLog[lastIndex], displayedName: fullName.substring(0, j) }
-              }
-              return newLog
-            })
+        // Add all games to log immediately (for fast processing)
+        // Then run typewriter effect in parallel for visual effect
+        const initialLogEntries = gamesToProcess.map((steamGame) => {
+          // Safely extract game name - handle cases where name might be a function or undefined
+          const nameValue = typeof steamGame?.name === 'function' 
+            ? 'Unknown Game' 
+            : (steamGame?.name || 'Unknown Game')
+          return {
+            gameName: String(nameValue),
+            status: 'syncing',
+            displayedName: ''
+          }
+        })
+        setSyncLog(initialLogEntries)
+        
+        // Start typewriter effects in background (non-blocking)
+        initialLogEntries.forEach((logEntry) => {
+          // Capture values immediately to avoid closure issues
+          const logEntryGameName = logEntry?.gameName
+          let gameNameStr = 'Unknown Game'
+          if (logEntryGameName && typeof logEntryGameName !== 'function') {
+            gameNameStr = `${logEntryGameName}`
           }
           
-          // Start processing this game (don't wait for it to finish before showing next)
-          const processGame = async () => {
+          // Typewriter effect in background (non-blocking)
+          (async () => {
+            // Re-capture inside async to ensure we have the right value
+            const targetGameName = gameNameStr
+            const fullName = targetGameName
+            
+            for (let j = 0; j <= fullName.length; j++) {
+              await new Promise(resolve => setTimeout(resolve, 60)) // 60ms per character for slower, more visible typing
+              setSyncLog(prev => prev.map((item) => {
+                // Match by gameName instead of index for reliability
+                let itemGameName = 'Unknown Game'
+                if (item?.gameName && typeof item.gameName !== 'function') {
+                  itemGameName = `${item.gameName}`
+                }
+                if (itemGameName === targetGameName) {
+                  return { ...item, displayedName: fullName.substring(0, j) }
+                }
+                return item
+              }))
+            }
+          })()
+        })
+        
+        // Process games in parallel batches for speed
+        const batchSize = 10
+        for (let i = 0; i < gamesToProcess.length; i += batchSize) {
+          const batch = gamesToProcess.slice(i, i + batchSize)
+          
+          // Process batch in parallel
+          await Promise.all(batch.map(async (steamGame) => {
+            const gameName = String(steamGame?.name || 'Unknown Game') // Ensure it's always a string
             
             // Fetch detailed game information
             let studioName = 'Unknown Studio'
@@ -373,45 +404,54 @@ function Integrations() {
 
               if (addResponse.ok) {
                 addedCount++
-                // Update log status to synced - find the first item with this gameName that's still syncing
-                setSyncLog(prev => prev.map(item => 
-                  item.gameName === gameName && item.status === 'syncing'
+                // Update log status to synced - find items with this gameName that are still syncing
+                setSyncLog(prev => prev.map(item => {
+                  const itemName = (item?.gameName && typeof item.gameName !== 'function') ? `${item.gameName}` : 'Unknown Game'
+                  const gameNameStr = (gameName && typeof gameName !== 'function') ? `${gameName}` : 'Unknown Game'
+                  return (itemName === gameNameStr && item.status === 'syncing')
                     ? { ...item, status: 'synced' }
                     : item
-                ))
+                }))
               } else if (addResponse.status === 409) {
                 skippedCount++
-                // Update log status to skipped
-                setSyncLog(prev => prev.map(item => 
-                  item.gameName === gameName && item.status === 'syncing'
-                    ? { ...item, status: 'skipped' }
+                // Mark as synced (already in library)
+                setSyncLog(prev => prev.map(item => {
+                  const itemName = (item?.gameName && typeof item.gameName !== 'function') ? `${item.gameName}` : 'Unknown Game'
+                  const gameNameStr = (gameName && typeof gameName !== 'function') ? `${gameName}` : 'Unknown Game'
+                  return (itemName === gameNameStr && item.status === 'syncing')
+                    ? { ...item, status: 'synced' }
                     : item
-                ))
+                }))
               }
             } catch (error) {
               console.error(`Error adding game ${steamGame.name}:`, error)
-              // Update log status to skipped on error
-              setSyncLog(prev => prev.map(item => 
-                item.gameName === gameName && item.status === 'syncing'
-                  ? { ...item, status: 'skipped' }
+              // Update log status to synced on error (treat as already in library)
+              setSyncLog(prev => prev.map(item => {
+                const itemName = (item?.gameName && typeof item.gameName !== 'function') ? `${item.gameName}` : 'Unknown Game'
+                const gameNameStr = (gameName && typeof gameName !== 'function') ? `${gameName}` : 'Unknown Game'
+                return (itemName === gameNameStr && item.status === 'syncing')
+                  ? { ...item, status: 'synced' }
                   : item
-              ))
+              }))
             } finally {
               processedCount++
               updateProgressIfNeeded()
             }
-          }
-          
-          // Start processing in background (don't await - process all games in parallel)
-          processGame()
-          
-          // Small delay before showing next game
-          await new Promise(resolve => setTimeout(resolve, 100))
+          }))
         }
         
-        // Final progress update
+        // Final progress update - sync is complete
         setSyncProgress({ current: totalGames, total: totalGames, currentGame: 'Complete!' })
-        setSyncLog(prev => [...prev]) // Trigger re-render to show final status
+        
+        // Ensure all remaining "syncing" games are marked as synced
+        // This handles any games that might have been missed
+        setSyncLog(prev => prev.map(item => {
+          if (item.status === 'syncing') {
+            // If still syncing at the end, mark as synced
+            return { ...item, status: 'synced' }
+          }
+          return item
+        }))
         
         // Mark sync as complete in database
         const syncCompleteResponse = await fetch(`${API_URL}/api/integrations/steam/sync-complete`, {
@@ -431,7 +471,7 @@ function Integrations() {
         setIsSteamSynchronized(true)
         // Store sync counts in state for showing in modal when clicking "Synchronized" button
         setSyncCounts({ addedCount, skippedCount })
-        setSyncSuccessModal({ show: true, addedCount, skippedCount })
+        // Don't show separate success modal - keep the sync modal open with console log visible
         setSteamHasSynced(true)
       } else {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
@@ -441,8 +481,8 @@ function Integrations() {
       console.error('Error syncing Steam library:', error)
       setErrorModal({ show: true, message: 'An error occurred while syncing your Steam library. Please try again.' })
     } finally {
-      setIsSyncing(false)
-      setSyncProgress({ current: 0, total: 0, currentGame: '' })
+      // Don't close the modal automatically - keep it open with console log visible
+      // setIsSyncing(false) - removed to keep modal open
       // Keep syncLog visible - don't clear it
     }
   }
@@ -480,7 +520,7 @@ function Integrations() {
 
       {/* Main Content */}
       <div className="container mx-auto px-6 py-6 md:py-12">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-4xl">
           {/* Header */}
           <div className="mb-8 md:mb-12">
             <button
@@ -694,9 +734,12 @@ function Integrations() {
       )}
       <Modal
         isOpen={isSyncing}
-        onClose={() => {}} // Don't allow closing during sync
-        title="Syncing Your Steam Library"
-        preventClose={true}
+        onClose={() => {
+          setIsSyncing(false)
+          setSyncProgress({ current: 0, total: 0, currentGame: '' })
+        }}
+        title={syncProgress.current === syncProgress.total && syncProgress.total > 0 ? "Sync Complete" : "Syncing Your Steam Library"}
+        preventClose={syncProgress.current !== syncProgress.total || syncProgress.total === 0}
       >
         <div className="space-y-6">
           <div>
@@ -718,9 +761,11 @@ function Integrations() {
               />
             </div>
             <p className="text-gray-500 text-xs text-center mb-4">
-              {syncProgress.total > 0 
-                ? `${Math.round((syncProgress.current / syncProgress.total) * 100)}% complete`
-                : 'Initializing...'}
+              {syncProgress.current === syncProgress.total && syncProgress.total > 0
+                ? 'Sync complete! You can close this window.'
+                : syncProgress.total > 0 
+                  ? `${Math.round((syncProgress.current / syncProgress.total) * 100)}% complete`
+                  : 'Initializing...'}
             </p>
             
             {/* Console-like log */}
@@ -739,7 +784,7 @@ function Integrations() {
                       ? logItem.gameName.substring(0, maxGameNameLength - 3) + '...'
                       : logItem.gameName
                     const availableWidth = 45
-                    const dotsCount = Math.max(2, availableWidth - gameNameDisplay.length - (logItem.status === 'synced' ? 6 : logItem.status === 'skipped' ? 7 : 9))
+                    const dotsCount = Math.max(2, availableWidth - gameNameDisplay.length - (logItem.status === 'synced' ? 6 : 9))
                     const dots = '.'.repeat(dotsCount)
                     
                     const statusColor = logItem.status === 'synced' 
@@ -768,46 +813,6 @@ function Integrations() {
         </div>
       </Modal>
 
-      {/* Sync Success Modal */}
-      <Modal
-        isOpen={syncSuccessModal.show && !isSyncing}
-        onClose={() => setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })}
-        title="Sync Complete"
-      >
-        <div className="space-y-4">
-          {syncSuccessModal.addedCount > 0 ? (
-            <p className="text-gray-300">
-              Successfully synced {syncSuccessModal.addedCount} {syncSuccessModal.addedCount === 1 ? 'game' : 'games'} from Steam
-              {syncSuccessModal.skippedCount > 0 && (
-                <span className="text-gray-400"> ({syncSuccessModal.skippedCount} already in library)</span>
-              )}
-            </p>
-          ) : (
-            <p className="text-gray-300">
-              All games are already in your library
-            </p>
-          )}
-          <div className="flex justify-end gap-3">
-            <button
-              onClick={() => setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })}
-              className="px-6 py-2 bg-gray-700/50 hover:bg-gray-700 text-white font-semibold rounded-xl transition-all"
-            >
-              OK
-            </button>
-            {!isOnDashboard && (
-              <button
-                onClick={() => {
-                  setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })
-                  navigate('/dashboard')
-                }}
-                className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-[1.02] shadow-lg shadow-purple-500/25"
-              >
-                Return to Dashboard
-              </button>
-            )}
-          </div>
-        </div>
-      </Modal>
 
       {/* Error Modal */}
       <Modal

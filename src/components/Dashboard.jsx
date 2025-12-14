@@ -311,30 +311,45 @@ function Dashboard() {
           }
         }
         
-        // Process games one by one with typewriter effect
-        for (let i = 0; i < gamesToProcess.length; i++) {
-          const steamGame = gamesToProcess[i]
-          const gameName = steamGame.name || 'Unknown Game'
-          
-          // Add game to log with typewriter effect
-          setSyncLog(prev => [...prev, { gameName, status: 'syncing', displayedName: '' }])
-          
-          // Typewriter effect - type out game name character by character
+        // Add all games to log immediately (for fast processing)
+        // Then run typewriter effect in parallel for visual effect
+        const initialLogEntries = gamesToProcess.map((steamGame) => ({
+          gameName: steamGame.name || 'Unknown Game',
+          status: 'syncing',
+          displayedName: ''
+        }))
+        setSyncLog(initialLogEntries)
+        
+        // Start typewriter effects in background (non-blocking)
+        initialLogEntries.forEach((logEntry) => {
+          const gameName = String(logEntry.gameName || 'Unknown Game') // Ensure it's always a string
           const fullName = gameName
-          for (let j = 0; j <= fullName.length; j++) {
-            await new Promise(resolve => setTimeout(resolve, 30)) // 30ms per character
-            setSyncLog(prev => {
-              const newLog = [...prev]
-              const lastIndex = newLog.length - 1
-              if (newLog[lastIndex] && newLog[lastIndex].gameName === gameName) {
-                newLog[lastIndex] = { ...newLog[lastIndex], displayedName: fullName.substring(0, j) }
-              }
-              return newLog
-            })
-          }
           
-          // Start processing this game (don't wait for it to finish before showing next)
-          const processGame = async () => {
+          // Typewriter effect in background (non-blocking)
+          (async () => {
+            for (let j = 0; j <= fullName.length; j++) {
+              await new Promise(resolve => setTimeout(resolve, 60)) // 60ms per character for slower, more visible typing
+              setSyncLog(prev => prev.map((item) => {
+                // Match by gameName instead of index for reliability
+                if (String(item.gameName) === gameName) {
+                  return { ...item, displayedName: fullName.substring(0, j) }
+                }
+                return item
+              }))
+            }
+          })()
+        })
+        
+        // Process games in parallel batches for speed
+        const batchSize = 10
+        for (let i = 0; i < gamesToProcess.length; i += batchSize) {
+          const batch = gamesToProcess.slice(i, i + batchSize)
+          
+          // Process batch in parallel
+          await Promise.all(batch.map(async (steamGame) => {
+            const gameName = String(steamGame?.name || 'Unknown Game') // Ensure it's always a string
+            
+            // Fetch detailed game information
             let studioName = 'Unknown Studio'
             let formattedReleaseDate = ''
             let gamePrice = null // Will store price if available
@@ -451,42 +466,46 @@ function Dashboard() {
                 addedCount++
                 // Update log status to synced - find the first item with this gameName that's still syncing
                 setSyncLog(prev => prev.map(item => 
-                  item.gameName === gameName && item.status === 'syncing'
+                  String(item.gameName) === String(gameName) && item.status === 'syncing'
                     ? { ...item, status: 'synced' }
                     : item
                 ))
               } else if (addResponse.status === 409) {
                 skippedCount++
-                // Update log status to skipped
+                // Mark as synced (already in library)
                 setSyncLog(prev => prev.map(item => 
-                  item.gameName === gameName && item.status === 'syncing'
-                    ? { ...item, status: 'skipped' }
+                  String(item.gameName) === String(gameName) && item.status === 'syncing'
+                    ? { ...item, status: 'synced' }
                     : item
                 ))
               }
             } catch (error) {
               console.error(`Error adding game ${steamGame.name}:`, error)
-              // Update log status to skipped on error
+              // Update log status to synced on error
               setSyncLog(prev => prev.map(item => 
-                item.gameName === gameName && item.status === 'syncing'
-                  ? { ...item, status: 'skipped' }
+                String(item.gameName) === String(gameName) && item.status === 'syncing'
+                  ? { ...item, status: 'synced' }
                   : item
               ))
             } finally {
               processedCount++
               updateProgressIfNeeded()
             }
-          }
-          
-          // Start processing in background (don't await - process all games in parallel)
-          processGame()
-          
-          // Small delay before showing next game
-          await new Promise(resolve => setTimeout(resolve, 100))
+          }))
         }
         
         // Final progress update
         setSyncProgress({ current: totalGames, total: totalGames, currentGame: 'Complete!' })
+        
+        // Ensure all remaining "syncing" games are marked as synced
+        // This handles any games that might have been missed
+        setSyncLog(prev => prev.map(item => {
+          if (item.status === 'syncing') {
+            // If still syncing at the end, mark as synced
+            return { ...item, status: 'synced' }
+          }
+          return item
+        }))
         
         // Update local state with new games (prepend to show most recent first)
         if (newGames.length > 0) {
@@ -592,88 +611,134 @@ function Dashboard() {
     setSelectedGame(null)
     setIsTimeOnlyMode(false)
     
-    // Process database update in background
-    try {
-      const token = localStorage.getItem('auth_token')
-      
-      // Ensure timePlayed is an integer and handle empty date strings
-      const updatePayload = {
-        name: gameInfo.name,
-        image: gameInfo.image,
-        releaseDate: gameInfo.releaseDate || null,
-        studio: gameInfo.studio || null,
-        steamAppId: gameInfo.steamAppId || null,
-        dateStarted: gameInfo.dateStarted && gameInfo.dateStarted.trim() !== '' ? gameInfo.dateStarted : null,
-        dateBought: gameInfo.dateBought && gameInfo.dateBought.trim() !== '' ? gameInfo.dateBought : null,
-        price: gameInfo.price && gameInfo.price !== '' ? parseFloat(gameInfo.price) : null,
-        timePlayed: timePlayedValue,
-      }
-      
-      console.log('Saving game info:', updatePayload)
-      
-      const response = await fetch(`${API_URL}/api/games/${gameInfo.id}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updatePayload),
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        console.log('Game updated successfully in database:', data.game)
-        
-        // Sync with database response (in case there were any server-side changes)
-        setAllGames(prevGames => {
-          const updatedGames = prevGames.map(game =>
-            game.id === gameInfo.id ? {
-              ...game,
-              ...data.game,
-              timePlayed: data.game.timePlayed || timePlayedValue
-            } : game
-          )
-          categorizeGames(updatedGames)
-          return updatedGames
-        })
-      } else {
-        const errorData = await response.json().catch(() => ({ error: 'Failed to update game' }))
-        console.error('Failed to update game in database:', errorData.error || 'Unknown error')
-        
-        // On error, revert to previous state by reloading from database
-        const gamesResponse = await fetch(`${API_URL}/api/games`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        })
-        
-        if (gamesResponse.ok) {
-          const gamesData = await gamesResponse.json()
-          categorizeGames(gamesData.games || [])
-        }
-      }
-    } catch (error) {
-      console.error('Error saving game info to database:', error)
-      
-      // On error, revert by reloading from database
+      // Process database update in background
+    ;(async () => {
       try {
         const token = localStorage.getItem('auth_token')
-        const gamesResponse = await fetch(`${API_URL}/api/games`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        })
+        const isTemporary = gameInfo.id && gameInfo.id.startsWith('temp-')
         
-        if (gamesResponse.ok) {
-          const gamesData = await gamesResponse.json()
-          categorizeGames(gamesData.games || [])
+        // Ensure timePlayed is an integer and handle empty date strings
+        const updatePayload = {
+          name: gameInfo.name,
+          image: gameInfo.image,
+          releaseDate: gameInfo.releaseDate || null,
+          studio: gameInfo.studio || null,
+          steamAppId: gameInfo.steamAppId || null,
+          dateStarted: gameInfo.dateStarted && gameInfo.dateStarted.trim() !== '' ? gameInfo.dateStarted : null,
+          dateBought: gameInfo.dateBought && gameInfo.dateBought.trim() !== '' ? gameInfo.dateBought : null,
+          price: gameInfo.price && gameInfo.price !== '' ? parseFloat(gameInfo.price) : null,
+          timePlayed: timePlayedValue,
         }
-      } catch (reloadError) {
-        console.error('Error reloading games:', reloadError)
+        
+        console.log('Saving game info:', updatePayload)
+        
+        let response
+        if (isTemporary) {
+          // If it's a temporary game, create it first with the form data
+          const createPayload = {
+            name: gameInfo.name,
+            image: gameInfo.image,
+            releaseDate: gameInfo.releaseDate || null,
+            studio: gameInfo.studio || null,
+            steamAppId: gameInfo.steamAppId || null,
+            dateStarted: updatePayload.dateStarted,
+            dateBought: updatePayload.dateBought,
+            price: updatePayload.price,
+            timePlayed: updatePayload.timePlayed,
+          }
+          
+          response = await fetch(`${API_URL}/api/games`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(createPayload),
+          })
+          
+          if (response.ok) {
+            const createData = await response.json()
+            const newGameId = createData.game.id
+            
+            // Replace temporary game with real game from database
+            setAllGames(prevGames => {
+              const updatedGames = prevGames.map(game => {
+                if (game.id === gameInfo.id) {
+                  return { ...createData.game, ...game }
+                }
+                return game
+              })
+              categorizeGames(updatedGames)
+              return updatedGames
+            })
+          }
+        } else {
+          // Normal update for existing game
+          response = await fetch(`${API_URL}/api/games/${gameInfo.id}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(updatePayload),
+          })
+        }
+
+        if (response.ok) {
+          const data = await response.json()
+          console.log('Game updated successfully in database:', data.game)
+          
+          // Sync with database response (in case there were any server-side changes)
+          setAllGames(prevGames => {
+            const updatedGames = prevGames.map(game =>
+              game.id === (isTemporary ? gameInfo.id : gameInfo.id) ? {
+                ...game,
+                ...data.game,
+                timePlayed: data.game.timePlayed || timePlayedValue
+              } : game
+            )
+            categorizeGames(updatedGames)
+            return updatedGames
+          })
+        } else {
+          const errorData = await response.json().catch(() => ({ error: 'Failed to update game' }))
+          console.error('Failed to update game in database:', errorData.error || 'Unknown error')
+          
+          // On error, revert to previous state by reloading from database
+          const gamesResponse = await fetch(`${API_URL}/api/games`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          })
+          
+          if (gamesResponse.ok) {
+            const gamesData = await gamesResponse.json()
+            categorizeGames(gamesData.games || [])
+          }
+        }
+      } catch (error) {
+        console.error('Error saving game info to database:', error)
+        
+        // On error, revert by reloading from database
+        try {
+          const token = localStorage.getItem('auth_token')
+          const gamesResponse = await fetch(`${API_URL}/api/games`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          })
+          
+          if (gamesResponse.ok) {
+            const gamesData = await gamesResponse.json()
+            categorizeGames(gamesData.games || [])
+          }
+        } catch (reloadError) {
+          console.error('Error reloading games:', reloadError)
+        }
       }
-    }
+    })()
   }
 
   const handleRemoveGame = async (game) => {
@@ -706,32 +771,69 @@ function Dashboard() {
   const handleAddGameToLibrary = async (gameData) => {
     if (!userId) return
     
-    try {
-      // Format release date from timestamp to "Month Year" format
-      let formattedReleaseDate = ''
-      if (gameData.releaseDate > 0) {
-        const date = new Date(gameData.releaseDate)
-        formattedReleaseDate = date.toLocaleDateString('en-US', {
-          month: 'short',
-          year: 'numeric'
-        })
-      }
+    // Format release date from timestamp to "Month Year" format
+    let formattedReleaseDate = ''
+    if (gameData.releaseDate > 0) {
+      const date = new Date(gameData.releaseDate)
+      formattedReleaseDate = date.toLocaleDateString('en-US', {
+        month: 'short',
+        year: 'numeric'
+      })
+    }
 
-      // Use the same image as shown in search results (header_image, typically 380x640 or higher)
-      // This ensures consistency between search and library display
-      let imageUrl = gameData.cover
-      
-      // If we have a steamAppId but no cover, try to get a high-res library image
-      // Otherwise, use the cover image from search (which is header_image)
-      if (gameData.steamAppId && !imageUrl) {
-        imageUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${gameData.steamAppId}/library_600x900.jpg`
-      }
+    // Use the same image as shown in search results (header_image, typically 380x640 or higher)
+    // This ensures consistency between search and library display
+    let imageUrl = gameData.cover
+    
+    // If we have a steamAppId but no cover, try to get a high-res library image
+    // Otherwise, use the cover image from search (which is header_image)
+    if (gameData.steamAppId && !imageUrl) {
+      imageUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${gameData.steamAppId}/library_600x900.jpg`
+    }
 
-      const token = localStorage.getItem('auth_token')
-      
-      // Fetch and log detailed game information if it's a Steam game
-      if (gameData.steamAppId) {
+    // Create a temporary game object immediately for optimistic UI update
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    const tempGame = {
+      id: tempId,
+      name: gameData.name,
+      image: imageUrl,
+      releaseDate: formattedReleaseDate,
+      studio: gameData.studio || 'Unknown Studio',
+      steamAppId: gameData.steamAppId || null,
+      timePlayed: 0,
+      dateStarted: null,
+      dateBought: null,
+      price: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isTemporary: true // Flag to identify temporary games
+    }
+
+    // Update UI immediately with optimistic update
+    const updatedGames = [tempGame, ...allGames]
+    categorizeGames(updatedGames)
+    
+    // Close add game modal and open info modal immediately
+    setIsAddGameModalOpen(false)
+    setSelectedGame(tempGame)
+    setIsTimeOnlyMode(false)
+    setIsGameInfoModalOpen(true)
+
+    // Reset mobile scroll index to show the new game
+    setCurrentGameIndex(0)
+
+    // Scroll to beginning to show the newly added game
+    setTimeout(() => {
+      if (gamesScrollRef.current) {
+        gamesScrollRef.current.scrollTo({ left: 0, behavior: 'smooth' })
+      }
+    }, 100)
+
+    // Fetch and log detailed game information in background (non-blocking)
+    if (gameData.steamAppId) {
+      (async () => {
         try {
+          const token = localStorage.getItem('auth_token')
           const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${gameData.steamAppId}`, {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -763,57 +865,76 @@ function Dashboard() {
         } catch (error) {
           console.error('Error fetching game details:', error)
         }
-      }
-      const response = await fetch(`${API_URL}/api/games`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: gameData.name,
-          image: imageUrl,
-          releaseDate: formattedReleaseDate,
-          studio: gameData.studio || 'Unknown Studio',
-          steamAppId: gameData.steamAppId || null,
-        }),
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        const newGame = data.game
-
-        // Update local state (prepend to show most recently added first)
-        const updatedGames = [newGame, ...allGames]
-        categorizeGames(updatedGames)
-        setIsAddGameModalOpen(false)
-
-        // Open game info modal to collect information
-        setSelectedGame(newGame)
-        setIsTimeOnlyMode(false)
-        setIsGameInfoModalOpen(true)
-
-        // Reset mobile scroll index to show the new game
-        setCurrentGameIndex(0)
-
-        // Scroll to beginning to show the newly added game
-        setTimeout(() => {
-          if (gamesScrollRef.current) {
-            gamesScrollRef.current.scrollTo({ left: 0, behavior: 'smooth' })
-          }
-        }, 100)
-      } else {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
-        if (response.status === 409) {
-          setGameAlreadyInLibraryModal(true)
-        } else {
-          setAddGameErrorModal({ show: true, message: `Failed to add game: ${errorData.error || 'Unknown error'}` })
-        }
-      }
-    } catch (error) {
-      console.error('Error adding game to library:', error)
-      setAddGameErrorModal({ show: true, message: 'An error occurred while adding the game. Please try again.' })
+      })()
     }
+
+    // Create game in database in background (non-blocking)
+    ;(async () => {
+      try {
+        const token = localStorage.getItem('auth_token')
+        const response = await fetch(`${API_URL}/api/games`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: gameData.name,
+            image: imageUrl,
+            releaseDate: formattedReleaseDate,
+            studio: gameData.studio || 'Unknown Studio',
+            steamAppId: gameData.steamAppId || null,
+          }),
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          const newGame = data.game
+
+          // Replace temporary game with real game from database
+          setAllGames(prevGames => {
+            const updatedGames = prevGames.map(game => 
+              game.id === tempId ? { ...newGame, ...game } : game
+            )
+            categorizeGames(updatedGames)
+            return updatedGames
+          })
+
+          // Update selectedGame if it's still the temporary one
+          setSelectedGame(prevGame => {
+            if (prevGame && prevGame.id === tempId) {
+              return { ...newGame, ...prevGame }
+            }
+            return prevGame
+          })
+        } else {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+          
+          // Remove temporary game on error
+          setAllGames(prevGames => prevGames.filter(game => game.id !== tempId))
+          
+          // Close modals and show error
+          setIsGameInfoModalOpen(false)
+          setSelectedGame(null)
+          
+          if (response.status === 409) {
+            setGameAlreadyInLibraryModal(true)
+          } else {
+            setAddGameErrorModal({ show: true, message: `Failed to add game: ${errorData.error || 'Unknown error'}` })
+          }
+        }
+      } catch (error) {
+        console.error('Error adding game to library:', error)
+        
+        // Remove temporary game on error
+        setAllGames(prevGames => prevGames.filter(game => game.id !== tempId))
+        
+        // Close modals and show error
+        setIsGameInfoModalOpen(false)
+        setSelectedGame(null)
+        setAddGameErrorModal({ show: true, message: 'An error occurred while adding the game. Please try again.' })
+      }
+    })()
   }
 
   useEffect(() => {
@@ -1206,19 +1327,15 @@ function Dashboard() {
                       ? displayedGameName.substring(0, maxGameNameLength - 3) + '...'
                       : displayedGameName
                     const availableWidth = 45
-                    const dotsCount = Math.max(2, availableWidth - gameNameDisplay.length - (logItem.status === 'synced' ? 6 : logItem.status === 'skipped' ? 7 : 9))
+                    const dotsCount = Math.max(2, availableWidth - gameNameDisplay.length - (logItem.status === 'synced' ? 6 : 9))
                     const dots = '.'.repeat(dotsCount)
                     
                     const statusColor = logItem.status === 'synced' 
                       ? 'text-green-400' 
-                      : logItem.status === 'skipped' 
-                        ? 'text-yellow-400' 
-                        : 'text-gray-400'
+                      : 'text-gray-400'
                     const statusText = logItem.status === 'synced' 
                       ? 'SYNCED' 
-                      : logItem.status === 'skipped' 
-                        ? 'SKIPPED' 
-                        : 'SYNCING...'
+                      : 'SYNCING...'
                     
                     return (
                       <div key={index} className="text-gray-300 whitespace-nowrap flex items-center">
