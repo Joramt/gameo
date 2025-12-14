@@ -316,11 +316,17 @@ function Dashboard() {
         for (let i = 0; i < gamesToProcess.length; i += batchSize) {
           const batch = gamesToProcess.slice(i, i + batchSize)
           
-          // Process batch in parallel
-          await Promise.all(batch.map(async (steamGame) => {
-            // Add to log as syncing
+          // Add games to log one by one (sequential display)
+          for (const steamGame of batch) {
             const gameName = steamGame.name || 'Unknown Game'
             setSyncLog(prev => [...prev, { gameName, status: 'syncing' }])
+            // Small delay to make them appear one by one
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+          
+          // Process batch in parallel (but logs already added sequentially)
+          await Promise.all(batch.map(async (steamGame) => {
+            const gameName = steamGame.name || 'Unknown Game'
             
             // Fetch detailed game information
             let studioName = 'Unknown Studio'
@@ -437,44 +443,29 @@ function Dashboard() {
                 const gameData = await addResponse.json()
                 newGames.push(gameData.game)
                 addedCount++
-                // Update log status to synced
-                setSyncLog(prev => {
-                  const newLog = [...prev]
-                  for (let i = newLog.length - 1; i >= 0; i--) {
-                    if (newLog[i].gameName === gameName && newLog[i].status === 'syncing') {
-                      newLog[i] = { ...newLog[i], status: 'synced' }
-                      break
-                    }
-                  }
-                  return newLog
-                })
+                // Update log status to synced - find the first item with this gameName that's still syncing
+                setSyncLog(prev => prev.map(item => 
+                  item.gameName === gameName && item.status === 'syncing'
+                    ? { ...item, status: 'synced' }
+                    : item
+                ))
               } else if (addResponse.status === 409) {
                 skippedCount++
                 // Update log status to skipped
-                setSyncLog(prev => {
-                  const newLog = [...prev]
-                  for (let i = newLog.length - 1; i >= 0; i--) {
-                    if (newLog[i].gameName === gameName && newLog[i].status === 'syncing') {
-                      newLog[i] = { ...newLog[i], status: 'skipped' }
-                      break
-                    }
-                  }
-                  return newLog
-                })
+                setSyncLog(prev => prev.map(item => 
+                  item.gameName === gameName && item.status === 'syncing'
+                    ? { ...item, status: 'skipped' }
+                    : item
+                ))
               }
             } catch (error) {
               console.error(`Error adding game ${steamGame.name}:`, error)
               // Update log status to skipped on error
-              setSyncLog(prev => {
-                const newLog = [...prev]
-                for (let i = newLog.length - 1; i >= 0; i--) {
-                  if (newLog[i].gameName === gameName && newLog[i].status === 'syncing') {
-                    newLog[i] = { ...newLog[i], status: 'skipped' }
-                    break
-                  }
-                }
-                return newLog
-              })
+              setSyncLog(prev => prev.map(item => 
+                item.gameName === gameName && item.status === 'syncing'
+                  ? { ...item, status: 'skipped' }
+                  : item
+              ))
             } finally {
               processedCount++
               updateProgressIfNeeded()
