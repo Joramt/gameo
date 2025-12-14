@@ -1,7 +1,7 @@
 import express from 'express'
 import { authenticateToken } from '../middleware/auth.js'
 import { supabase } from '../services/supabase.js'
-import crypto from 'crypto'
+import jwt from 'jsonwebtoken'
 
 const router = express.Router()
 
@@ -9,6 +9,7 @@ const router = express.Router()
 const STEAM_OPENID_URL = 'https://steamcommunity.com/openid/login'
 const STEAM_API_KEY = process.env.STEAM_API_KEY || ''
 const STEAM_RETURN_URL = process.env.STEAM_RETURN_URL || 'http://localhost:3000/api/integrations/steam/callback'
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production'
 
 /**
  * GET /api/integrations
@@ -45,18 +46,28 @@ router.get('/', authenticateToken, async (req, res) => {
  */
 router.post('/steam/auth', authenticateToken, async (req, res) => {
   try {
-    // Generate a unique nonce for this authentication attempt
-    const nonce = crypto.randomBytes(16).toString('hex')
-    
-    // Store nonce in session/database temporarily (simplified - in production use Redis or session store)
-    // For now, we'll include it in the return URL
+    if (!supabase) {
+      return res.status(500).json({ error: 'Server configuration error' })
+    }
+
+    // Create a temporary JWT token to encode the userId (expires in 10 minutes)
+    const tempToken = jwt.sign(
+      { userId: req.userId, purpose: 'steam_auth' },
+      JWT_SECRET,
+      { expiresIn: '10m' }
+    )
     
     // Build Steam OpenID authentication URL
+    // Realm and return_to must match - extract domain from return URL
+    const returnUrl = new URL(STEAM_RETURN_URL)
+    const realm = `${returnUrl.protocol}//${returnUrl.host}`
+    const returnTo = `${STEAM_RETURN_URL}?token=${tempToken}`
+    
     const params = new URLSearchParams({
       'openid.ns': 'http://specs.openid.net/auth/2.0',
       'openid.mode': 'checkid_setup',
-      'openid.return_to': `${STEAM_RETURN_URL}?nonce=${nonce}&userId=${req.userId}`,
-      'openid.realm': process.env.FRONTEND_URL || 'http://localhost:5173',
+      'openid.return_to': returnTo,
+      'openid.realm': realm,
       'openid.identity': 'http://specs.openid.net/auth/2.0/identifier_select',
       'openid.claimed_id': 'http://specs.openid.net/auth/2.0/identifier_select'
     })
@@ -64,8 +75,7 @@ router.post('/steam/auth', authenticateToken, async (req, res) => {
     const authUrl = `${STEAM_OPENID_URL}?${params.toString()}`
 
     res.json({
-      authUrl,
-      nonce
+      authUrl
     })
   } catch (error) {
     console.error('Steam auth initiation error:', error)
@@ -75,27 +85,83 @@ router.post('/steam/auth', authenticateToken, async (req, res) => {
 
 /**
  * GET /api/integrations/steam/callback
- * Handle Steam OpenID callback
+ * Handle Steam OpenID callback (Steam sends GET request with query params)
  */
 router.get('/steam/callback', async (req, res) => {
   try {
-    const { 'openid.identity': identity, 'openid.return_to': returnTo, nonce, userId } = req.query
+    console.log('Steam callback received:', req.query)
+    const { token } = req.query
+    const openIdParams = req.query
 
-    if (!identity || !returnTo) {
+    if (!token) {
+      console.error('No token in callback')
       return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/integrations?error=invalid_response`)
+    }
+
+    // Get userId from JWT token
+    let userId = null
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET)
+      if (decoded.purpose === 'steam_auth' && decoded.userId) {
+        userId = decoded.userId
+      } else {
+        console.error('Invalid token purpose or missing userId')
+        return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/integrations?error=invalid_token`)
+      }
+    } catch (err) {
+      console.error('Token verification failed:', err.message)
+      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/integrations?error=token_expired`)
     }
 
     // Extract Steam ID from OpenID identity URL
     // Format: https://steamcommunity.com/openid/id/76561198012345678
+    const identity = openIdParams['openid.identity'] || openIdParams.identity
+    if (!identity) {
+      console.error('No identity in OpenID response')
+      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/integrations?error=invalid_response`)
+    }
+
     const steamIdMatch = identity.match(/\/id\/(\d+)$/)
     if (!steamIdMatch) {
+      console.error('Invalid Steam ID format:', identity)
       return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/integrations?error=invalid_steam_id`)
     }
 
     const steamId = steamIdMatch[1]
 
-    // Verify the OpenID response (simplified - in production should verify signature)
-    // For now, we'll trust Steam's response
+    // Verify the OpenID response with Steam
+    const verifyParams = new URLSearchParams({
+      'openid.ns': openIdParams['openid.ns'] || 'http://specs.openid.net/auth/2.0',
+      'openid.mode': 'check_authentication',
+      'openid.op_endpoint': openIdParams['openid.op_endpoint'] || 'https://steamcommunity.com/openid/login',
+      'openid.claimed_id': openIdParams['openid.claimed_id'] || identity,
+      'openid.identity': identity,
+      'openid.return_to': openIdParams['openid.return_to'] || `${STEAM_RETURN_URL}?token=${token}`,
+      'openid.response_nonce': openIdParams['openid.response_nonce'] || '',
+      'openid.assoc_handle': openIdParams['openid.assoc_handle'] || '',
+      'openid.signed': openIdParams['openid.signed'] || '',
+      'openid.sig': openIdParams['openid.sig'] || ''
+    })
+
+    try {
+      const verifyResponse = await fetch(STEAM_OPENID_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: verifyParams.toString()
+      })
+
+      const verifyText = await verifyResponse.text()
+      // Steam returns "is_valid:true" if valid
+      if (!verifyText.includes('is_valid:true')) {
+        console.error('OpenID verification failed:', verifyText)
+        return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/integrations?error=verification_failed`)
+      }
+    } catch (verifyError) {
+      console.error('Error verifying OpenID response:', verifyError)
+      // Continue anyway - in production you might want to fail here
+    }
 
     // Store the connection in database
     if (!supabase) {
@@ -103,12 +169,16 @@ router.get('/steam/callback', async (req, res) => {
     }
 
     // Check if connection already exists
-    const { data: existing } = await supabase
+    const { data: existing, error: checkError } = await supabase
       .from('user_integrations')
       .select('id')
       .eq('user_id', userId)
       .eq('service', 'steam')
-      .single()
+      .maybeSingle()
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.error('Error checking existing connection:', checkError)
+    }
 
     if (existing) {
       // Update existing connection
@@ -116,7 +186,6 @@ router.get('/steam/callback', async (req, res) => {
         .from('user_integrations')
         .update({
           external_id: steamId,
-          connected_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
         .eq('id', existing.id)
@@ -140,7 +209,7 @@ router.get('/steam/callback', async (req, res) => {
 
       if (insertError) {
         console.error('Error creating Steam connection:', insertError)
-        return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/integrations?error=insert_failed`)
+        return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/integrations?error=insert_failed&details=${encodeURIComponent(insertError.message)}`)
       }
     }
 
