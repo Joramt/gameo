@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import Modal from './Modal'
+import Navigation from './Navigation'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
 function Integrations() {
   const { isAuthenticated, user, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
+  const isOnDashboard = location.pathname === '/dashboard'
   const [steamConnected, setSteamConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
@@ -291,54 +294,27 @@ function Integrations() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900">
       {/* Navigation */}
-      <nav className="bg-gray-800/50 backdrop-blur-md border-b border-white/10 sticky top-0 z-40">
-        <div className="container mx-auto px-4 md:px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <button
-                onClick={() => navigate('/dashboard')}
-                className="text-gray-400 hover:text-white transition-colors"
-                aria-label="Back to dashboard"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-              <button
-                onClick={() => navigate('/dashboard')}
-                className="flex items-center space-x-2 group"
-              >
-                <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
-                  <span className="text-xl font-bold text-white">G</span>
-                </div>
-                <span className="text-xl font-bold text-white group-hover:text-purple-300 transition-colors">Gameo</span>
-              </button>
-              <button
-                onClick={() => navigate('/dashboard')}
-                className="ml-4 text-gray-300 hover:text-white text-sm font-medium transition-colors hidden md:block"
-              >
-                Dashboard
-              </button>
-            </div>
-            <div className="flex items-center space-x-4">
-              {user?.picture && (
-                <img
-                  src={user.picture}
-                  alt={user.name}
-                  className="w-8 h-8 rounded-full"
-                />
-              )}
-              <span className="text-white text-sm hidden md:block">{user?.name || user?.email}</span>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Navigation />
 
       {/* Main Content */}
-      <div className="container mx-auto px-4 md:px-6 py-8 md:py-12">
+      <div className="container mx-auto px-6 py-6 md:py-12">
         <div className="max-w-4xl mx-auto">
           {/* Header */}
           <div className="mb-8 md:mb-12">
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="flex items-center text-gray-400 hover:text-gray-300 text-sm mb-3 transition-colors group"
+            >
+              <svg 
+                className="w-4 h-4 mr-1.5 group-hover:-translate-x-0.5 transition-transform" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              <span>Return to Dashboard</span>
+            </button>
             <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
               Integrations
             </h1>
@@ -348,10 +324,10 @@ function Integrations() {
 
             {/* How it works - Collapsible */}
             <div 
-              className={`bg-blue-500/10 border border-blue-500/30 rounded-2xl p-6 mb-8 relative overflow-hidden transition-all duration-300 ease-in-out ${
+              className={`bg-blue-500/10 border border-blue-500/30 rounded-2xl mb-8 relative overflow-hidden transition-all duration-300 ease-in-out ${
                 showHowItWorks 
-                  ? 'opacity-100 max-h-96 mb-8' 
-                  : 'opacity-0 max-h-0 mb-0 p-0 border-0'
+                  ? 'opacity-100 max-h-[200px] p-6 mb-8' 
+                  : 'opacity-0 max-h-0 p-0 mb-0 border-0'
               }`}
             >
               <button
@@ -377,6 +353,7 @@ function Integrations() {
                 </div>
               </div>
             </div>
+            )}
           </div>
 
           {/* Success/Error Messages */}
@@ -543,15 +520,17 @@ function Integrations() {
             >
               OK
             </button>
-            <button
-              onClick={() => {
-                setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })
-                navigate('/dashboard')
-              }}
-              className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-[1.02] shadow-lg shadow-purple-500/25"
-            >
-              Return to Dashboard
-            </button>
+            {!isOnDashboard && (
+              <button
+                onClick={() => {
+                  setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })
+                  navigate('/dashboard')
+                }}
+                className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-[1.02] shadow-lg shadow-purple-500/25"
+              >
+                Return to Dashboard
+              </button>
+            )}
           </div>
         </div>
       </Modal>

@@ -1,5 +1,5 @@
 import { useAuth } from '../contexts/AuthContext'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useEffect, useState, useRef } from 'react'
 import GameCard from './GameCard'
 import AddGameCard from './AddGameCard'
@@ -7,14 +7,52 @@ import AddGameModal from './AddGameModal'
 import GameInfoModal from './GameInfoModal'
 import GameLibrary3D from './GameLibrary3D'
 import Modal from './Modal'
+import Navigation from './Navigation'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
 function Dashboard() {
   const { isAuthenticated, user, logout, isLoading, hasBudget } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const isOnDashboard = location.pathname === '/dashboard'
+
+  // Capitalize first letter of each word in a name
+  const capitalizeName = (name) => {
+    if (!name) return ''
+    return name.split(' ').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    ).join(' ')
+  }
+
+  // Helper function to categorize games by date
+  const categorizeGames = (games) => {
+    const now = new Date()
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+    
+    const lastWeek = games.filter(game => {
+      if (!game.createdAt) return false
+      const createdDate = new Date(game.createdAt)
+      return createdDate >= oneWeekAgo
+    })
+    
+    const lastMonth = games.filter(game => {
+      if (!game.createdAt) return false
+      const createdDate = new Date(game.createdAt)
+      return createdDate >= oneMonthAgo && createdDate < oneWeekAgo
+    })
+    
+    setLastWeekGames(lastWeek)
+    setLastMonthGames(lastMonth)
+    setAllGames(games)
+    setRecentGames(games) // Keep for compatibility
+  }
 
   const [recentGames, setRecentGames] = useState([])
+  const [lastWeekGames, setLastWeekGames] = useState([])
+  const [lastMonthGames, setLastMonthGames] = useState([])
+  const [allGames, setAllGames] = useState([])
   const [isAddGameModalOpen, setIsAddGameModalOpen] = useState(false)
   const [isGameInfoModalOpen, setIsGameInfoModalOpen] = useState(false)
   const [selectedGame, setSelectedGame] = useState(null)
@@ -30,7 +68,6 @@ function Dashboard() {
   const [isCheckingSteam, setIsCheckingSteam] = useState(true)
   const [steamConnected, setSteamConnected] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
-  const [showUserMenu, setShowUserMenu] = useState(false)
   const [showLeftFade, setShowLeftFade] = useState(false)
   const [showRightFade, setShowRightFade] = useState(true)
   const [syncSuccessModal, setSyncSuccessModal] = useState({ show: false, addedCount: 0, skippedCount: 0 })
@@ -134,16 +171,15 @@ function Dashboard() {
         if (response.ok) {
           const data = await response.json()
           const games = data.games || []
-          
-          setRecentGames(games)
+          categorizeGames(games)
           setCurrentGameIndex(0)
         } else {
           console.error('Failed to load games')
-          setRecentGames([])
+          categorizeGames([])
         }
       } catch (error) {
         console.error('Error loading games:', error)
-        setRecentGames([])
+        categorizeGames([])
       } finally {
         setIsLoadingGames(false)
       }
@@ -258,7 +294,8 @@ function Dashboard() {
         
         // Update local state with new games (prepend to show most recent first)
         if (newGames.length > 0) {
-          setRecentGames(prevGames => [...newGames, ...prevGames])
+          const updatedGames = [...newGames, ...allGames]
+          categorizeGames(updatedGames)
           
           // Reset mobile index to show new games
           setCurrentGameIndex(0)
@@ -359,15 +396,6 @@ function Dashboard() {
         const data = await response.json()
         console.log('Game updated successfully:', data.game)
         
-        // Update local state
-        setRecentGames(prevGames =>
-          prevGames.map(game =>
-            game.id === gameInfo.id ? data.game : game
-          )
-        )
-        // Reset time-only mode after successful save
-        setIsTimeOnlyMode(false)
-        
         // Reload games from database to ensure we have the latest data
         const gamesResponse = await fetch(`${API_URL}/api/games`, {
           headers: {
@@ -378,15 +406,16 @@ function Dashboard() {
         
         if (gamesResponse.ok) {
           const gamesData = await gamesResponse.json()
-          const updatedGame = gamesData.games?.find(g => g.id === gameInfo.id)
-          if (updatedGame) {
-            setRecentGames(prevGames =>
-              prevGames.map(game =>
-                game.id === gameInfo.id ? updatedGame : game
-              )
-            )
-          }
+          categorizeGames(gamesData.games || [])
+        } else {
+          // Fallback: update local state if reload fails
+          const updatedGames = allGames.map(game =>
+            game.id === gameInfo.id ? data.game : game
+          )
+          categorizeGames(updatedGames)
         }
+        // Reset time-only mode after successful save
+        setIsTimeOnlyMode(false)
       } else {
         const errorData = await response.json().catch(() => ({ error: 'Failed to update game' }))
         console.error('Failed to update game:', errorData.error || 'Unknown error')
@@ -411,7 +440,8 @@ function Dashboard() {
 
       if (response.ok) {
         // Remove from local state
-        setRecentGames(prevGames => prevGames.filter(g => g.id !== game.id))
+        const updatedGames = allGames.filter(g => g.id !== game.id)
+        categorizeGames(updatedGames)
       } else {
         console.error('Failed to remove game')
         setRemoveGameErrorModal({ show: true, message: 'Failed to remove game. Please try again.' })
@@ -467,7 +497,8 @@ function Dashboard() {
         const newGame = data.game
 
         // Update local state (prepend to show most recently added first)
-        setRecentGames(prevGames => [newGame, ...prevGames])
+        const updatedGames = [newGame, ...allGames]
+        categorizeGames(updatedGames)
         setIsAddGameModalOpen(false)
 
         // Open game info modal to collect information
@@ -523,86 +554,7 @@ function Dashboard() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900">
       {/* Navigation */}
-      <nav className="bg-gray-800 border-b border-gray-700">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
-                <span className="text-2xl font-bold text-white">G</span>
-              </div>
-              <span className="text-2xl font-bold text-white">Gameo</span>
-            </div>
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={() => navigate('/integrations')}
-                className="flex items-center space-x-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
-                aria-label="Integrations"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                </svg>
-                <span className="hidden md:inline">Integrations</span>
-              </button>
-              
-              {/* User Menu */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowUserMenu(!showUserMenu)}
-                  className="flex items-center space-x-2 focus:outline-none"
-                  aria-label="User menu"
-                >
-                  {user?.picture ? (
-                    <img
-                      src={user.picture}
-                      alt={user.name}
-                      className="w-10 h-10 rounded-full border-2 border-gray-600 hover:border-purple-500 transition-colors"
-                    />
-                  ) : (
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center border-2 border-gray-600 hover:border-purple-500 transition-colors">
-                      <span className="text-white font-semibold">
-                        {(user?.name || user?.email || 'U')[0].toUpperCase()}
-                      </span>
-                    </div>
-                  )}
-                  <span className="text-white hidden md:inline">{user?.name || user?.email}</span>
-                  <svg 
-                    className={`w-5 h-5 text-gray-400 transition-transform ${showUserMenu ? 'transform rotate-180' : ''}`}
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                
-                {/* Dropdown Menu */}
-                {showUserMenu && (
-                  <>
-                    <div 
-                      className="fixed inset-0 z-40" 
-                      onClick={() => setShowUserMenu(false)}
-                    />
-                    <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-700 py-2 z-50">
-                      <button
-                        onClick={() => {
-                          setShowUserMenu(false)
-                          logout()
-                        }}
-                        className="w-full text-left px-4 py-2 text-red-400 hover:bg-gray-700 transition-colors flex items-center space-x-2"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                        </svg>
-                        <span>Logout</span>
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Navigation />
 
 
       {/* Dashboard Content */}
@@ -610,7 +562,7 @@ function Dashboard() {
         <div className="max-w-7xl mx-auto">
           <div className="mb-4 md:mb-8">
             <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
-              Welcome back, {user?.name?.split(' ')[0] || 'Gamer'}! 🎮
+              Welcome back, {user?.name ? capitalizeName(user.name.split(' ')[0]) : 'Gamer'}! 🎮
             </h1>
             <p className="text-gray-400 text-sm md:text-base" id="games-description">
               Games{' '}
@@ -620,7 +572,7 @@ function Dashboard() {
             </p>
           </div>
 
-          {/* Recent Games - Horizontal Scroll with Fixed Add Game Card */}
+          {/* Game Lists - Last Week, Last Month, All Games */}
           {isLoadingGames ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
@@ -628,6 +580,40 @@ function Dashboard() {
                 <p className="text-gray-400 text-sm">Loading your games...</p>
               </div>
             </div>
+          ) : allGames.length === 0 ? (
+            // Empty state - show big add game card
+            <>
+              <div className="md:hidden mb-4">
+                <button
+                  onClick={handleAddGame}
+                  className="w-full text-center px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-medium rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+                  aria-label="Add a new game to your library"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 4v16m8-8H4"
+                    />
+                  </svg>
+                  New Game
+                </button>
+              </div>
+              <div className="w-full">
+                <AddGameCard 
+                  onClick={handleAddGame} 
+                  isEmptyState={true}
+                  steamConnected={steamConnected}
+                  navigate={navigate}
+                />
+              </div>
+            </>
           ) : (
             <>
               {/* Mobile: Add Game Button */}
@@ -654,157 +640,190 @@ function Dashboard() {
                 </button>
               </div>
 
-              {/* Desktop: Add Game Card on Left */}
-              <div className="hidden md:flex gap-6 items-stretch" role="list" aria-labelledby="games-description">
-                <div className="flex-shrink-0">
-                  <AddGameCard onClick={handleAddGame} />
-                </div>
-
-                {/* Game Cards - Horizontal Scroll Container */}
-                {recentGames.length > 0 ? (
-                  <div className="relative flex-1 min-w-0">
-                    {/* Left fade shadow - only show when scrolled, hidden on mobile */}
-                    <div 
-                      className={`hidden md:block absolute left-0 top-0 bottom-4 w-12 pointer-events-none z-10 transition-opacity duration-300 ${showLeftFade ? 'opacity-100' : 'opacity-0'}`}
-                      style={{
-                        background: 'linear-gradient(to right, rgb(50, 26, 84), rgb(88 28 135 / 30%), transparent)'
-                      }}
-                    ></div>
-                    {/* Right fade shadow - hide when at end, hidden on mobile */}
-                    <div 
-                      className={`hidden md:block absolute right-0 top-0 bottom-4 w-12 pointer-events-none z-10 transition-opacity duration-300 ${showRightFade ? 'opacity-100' : 'opacity-0'}`}
-                      style={{
-                        background: 'linear-gradient(to left, rgb(74, 27, 115), rgb(88 28 135 / 36%), transparent)'
-                      }}
-                    ></div>
-                    <div 
-                      ref={gamesScrollRef}
-                      className="flex gap-6 overflow-x-auto pb-4" 
-                      style={{ 
-                        scrollbarWidth: 'thin',
-                        scrollbarColor: '#4b5563 #1f2937'
-                      }}
-                    >
-                    {recentGames.map((game) => (
-                      <GameCard 
-                        key={game.id} 
-                        game={game}
-                        onTimerClick={handleTimerClick}
-                        onRemove={handleRemoveGame}
-                      />
-                    ))}
+              {/* Last Week Games */}
+              <div className="mb-8 md:mb-12">
+                <h2 className="text-xl md:text-2xl font-bold text-white mb-4">
+                  Added This Week
+                </h2>
+                {lastWeekGames.length > 0 ? (
+                  <div className="hidden md:flex gap-6 items-stretch">
+                    <div className="flex-shrink-0">
+                      <AddGameCard onClick={handleAddGame} />
+                    </div>
+                    <div className="relative flex-1 min-w-0">
+                      <div 
+                        className="flex gap-6 overflow-x-auto pb-4" 
+                        style={{ 
+                          scrollbarWidth: 'thin',
+                          scrollbarColor: '#4b5563 #1f2937'
+                        }}
+                      >
+                        {lastWeekGames.map((game) => (
+                          <GameCard 
+                            key={game.id} 
+                            game={game}
+                            onTimerClick={handleTimerClick}
+                            onRemove={handleRemoveGame}
+                          />
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="flex-1 flex items-center justify-center py-12">
-                    <div className="text-center">
-                      <p className="text-gray-400 text-lg">
-                        You don't have any games in your library yet
-                      </p>
-                      <p className="text-gray-500 text-sm mt-2">
-                        Click the card on the left to add your first game!
-                      </p>
+                  <div className="bg-gray-800/30 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6 text-center">
+                    <p className="text-gray-400 text-sm">✨ No new games this week - time to discover something new! ✨</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Last Month Games (excluding last week) */}
+              <div className="mb-8 md:mb-12">
+                <h2 className="text-xl md:text-2xl font-bold text-white mb-4">
+                  Added This Month
+                </h2>
+                {lastMonthGames.length > 0 ? (
+                  <div className="hidden md:flex gap-6 items-stretch">
+                    <div className="flex-shrink-0">
+                      <AddGameCard onClick={handleAddGame} />
                     </div>
+                    <div className="relative flex-1 min-w-0">
+                      <div 
+                        className="flex gap-6 overflow-x-auto pb-4" 
+                        style={{ 
+                          scrollbarWidth: 'thin',
+                          scrollbarColor: '#4b5563 #1f2937'
+                        }}
+                      >
+                        {lastMonthGames.map((game) => (
+                          <GameCard 
+                            key={game.id} 
+                            game={game}
+                            onTimerClick={handleTimerClick}
+                            onRemove={handleRemoveGame}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-gray-800/30 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6 text-center">
+                    <p className="text-gray-400 text-sm">📅 Your collection is growing! No games added this month yet.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* All Games */}
+              <div className="mb-8 md:mb-12">
+                <h2 className="text-xl md:text-2xl font-bold text-white mb-4">
+                  All Games
+                </h2>
+                {allGames.length > 0 ? (
+                  <div className="hidden md:flex gap-6 items-stretch">
+                    <div className="flex-shrink-0">
+                      <AddGameCard onClick={handleAddGame} />
+                    </div>
+                    <div className="relative flex-1 min-w-0">
+                      <div 
+                        className="flex gap-6 overflow-x-auto pb-4" 
+                        style={{ 
+                          scrollbarWidth: 'thin',
+                          scrollbarColor: '#4b5563 #1f2937'
+                        }}
+                      >
+                        {allGames.map((game) => (
+                          <GameCard 
+                            key={game.id} 
+                            game={game}
+                            onTimerClick={handleTimerClick}
+                            onRemove={handleRemoveGame}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-gray-800/30 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6 text-center">
+                    <p className="text-gray-400 text-sm">No games in your library yet 🎮</p>
                   </div>
                 )}
               </div>
 
               {/* Mobile: Full Screen Game Cards with Swipe */}
-              {recentGames.length > 0 ? (
+              <div 
+                ref={mobileScrollRef}
+                className="md:hidden relative overflow-hidden pb-4 hide-scrollbar"
+                style={{ 
+                  height: 'calc(100vh - 240px)',
+                  touchAction: 'pan-y pinch-zoom'
+                }}
+                onTouchStart={(e) => {
+                  if (isScrolling.current) return
+                  touchStartX.current = e.touches[0].clientX
+                  touchStartY.current = e.touches[0].clientY
+                }}
+                onTouchMove={(e) => {
+                  if (isScrolling.current) return
+                  const touchX = e.touches[0].clientX
+                  const touchY = e.touches[0].clientY
+                  const deltaX = touchX - touchStartX.current
+                  const deltaY = touchY - touchStartY.current
+                  
+                  if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
+                    e.preventDefault()
+                  }
+                }}
+                onTouchEnd={(e) => {
+                  if (isScrolling.current) return
+                  const touchEndX = e.changedTouches[0].clientX
+                  const touchEndY = e.changedTouches[0].clientY
+                  const deltaX = touchEndX - touchStartX.current
+                  const deltaY = touchEndY - touchStartY.current
+                  
+                  if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
+                    isScrolling.current = true
+                    
+                    setCurrentGameIndex((prevIndex) => {
+                      let newIndex = prevIndex
+                      if (deltaX < 0 && prevIndex < allGames.length - 1) {
+                        newIndex = prevIndex + 1
+                      } else if (deltaX > 0 && prevIndex > 0) {
+                        newIndex = prevIndex - 1
+                      }
+                      return newIndex
+                    })
+                    
+                    setTimeout(() => {
+                      isScrolling.current = false
+                    }, 300)
+                  }
+                }}
+              >
                 <div 
-                  ref={mobileScrollRef}
-                  className="md:hidden relative overflow-hidden pb-4 hide-scrollbar"
-                  style={{ 
-                    height: 'calc(100vh - 240px)', // Account for nav (~64px) + h1/p (~100px) + button (~60px) + padding (~16px)
-                    touchAction: 'pan-y pinch-zoom' // Disable horizontal pan, allow vertical
-                  }}
-                  onTouchStart={(e) => {
-                    if (isScrolling.current) return
-                    touchStartX.current = e.touches[0].clientX
-                    touchStartY.current = e.touches[0].clientY
-                  }}
-                  onTouchMove={(e) => {
-                    if (isScrolling.current) return
-                    const touchX = e.touches[0].clientX
-                    const touchY = e.touches[0].clientY
-                    const deltaX = touchX - touchStartX.current
-                    const deltaY = touchY - touchStartY.current
-                    
-                    // Only handle horizontal swipes (ignore vertical scrolling)
-                    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
-                      e.preventDefault()
-                    }
-                  }}
-                  onTouchEnd={(e) => {
-                    if (isScrolling.current) return
-                    const touchEndX = e.changedTouches[0].clientX
-                    const touchEndY = e.changedTouches[0].clientY
-                    const deltaX = touchEndX - touchStartX.current
-                    const deltaY = touchEndY - touchStartY.current
-                    
-                    // Only handle horizontal swipes (minimum 50px swipe distance)
-                    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
-                      isScrolling.current = true
-                      
-                      setCurrentGameIndex((prevIndex) => {
-                        let newIndex = prevIndex
-                        // Swipe left (negative deltaX) = show next game (increase index)
-                        // Swipe right (positive deltaX) = show previous game (decrease index)
-                        if (deltaX < 0 && prevIndex < recentGames.length - 1) {
-                          // Swipe left - go to next game
-                          newIndex = prevIndex + 1
-                        } else if (deltaX > 0 && prevIndex > 0) {
-                          // Swipe right - go to previous game
-                          newIndex = prevIndex - 1
-                        }
-                        return newIndex
-                      })
-                      
-                      // Reset scrolling flag after animation
-                      setTimeout(() => {
-                        isScrolling.current = false
-                      }, 300)
-                    }
+                  className="flex h-full transition-transform duration-300 ease-out"
+                  style={{
+                    transform: `translateX(${-currentGameIndex * 100}%)`,
+                    width: `100%`
                   }}
                 >
-                  <div 
-                    className="flex h-full transition-transform duration-300 ease-out"
-                    style={{
-                      transform: `translateX(${-currentGameIndex * 100}%)`,
-                      width: `100%`
-                    }}
-                  >
-                    {recentGames.map((game) => (
-                      <div 
-                        key={game.id} 
-                        className="flex-shrink-0 w-full h-full flex justify-center self-center"
-                      >
-                        <GameCard 
-                          game={game}
-                          onTimerClick={handleTimerClick}
-                          onRemove={handleRemoveGame}
-                        />
-                      </div>
-                    ))}
-                  </div>
+                  {allGames.map((game) => (
+                    <div 
+                      key={game.id} 
+                      className="flex-shrink-0 w-full h-full flex justify-center self-center"
+                    >
+                      <GameCard 
+                        game={game}
+                        onTimerClick={handleTimerClick}
+                        onRemove={handleRemoveGame}
+                      />
+                    </div>
+                  ))}
                 </div>
-              ) : (
-                <div className="md:hidden flex items-center justify-center py-12">
-                  <div className="text-center">
-                    <p className="text-gray-400 text-lg">
-                      You don't have any games in your library yet
-                    </p>
-                    <p className="text-gray-500 text-sm mt-2">
-                      Click the button above to add your first game!
-                    </p>
-                  </div>
-                </div>
-              )}
+              </div>
             </>
           )}
 
           {/* 3D Library Room */}
-          {recentGames.length > 0 && (
+          {allGames.length > 0 && (
             <div className="mt-8 md:mt-12">
               <h2 className="text-2xl md:text-3xl font-bold text-white mb-4">
                 Your Game Library
@@ -812,7 +831,7 @@ function Dashboard() {
               <p className="text-gray-400 mb-6 text-sm md:text-base">
                 Explore your collection in 3D • Drag to look around
               </p>
-              <GameLibrary3D games={recentGames} />
+              <GameLibrary3D games={allGames} />
             </div>
           )}
         </div>
@@ -899,12 +918,17 @@ function Dashboard() {
             >
               OK
             </button>
-            <button
-              onClick={() => setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })}
-              className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-[1.02] shadow-lg shadow-purple-500/25"
-            >
-              Return to Dashboard
-            </button>
+            {!isOnDashboard && (
+              <button
+                onClick={() => {
+                  setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0 })
+                  navigate('/dashboard')
+                }}
+                className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-[1.02] shadow-lg shadow-purple-500/25"
+              >
+                Return to Dashboard
+              </button>
+            )}
           </div>
         </div>
       </Modal>

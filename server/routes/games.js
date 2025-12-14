@@ -37,6 +37,7 @@ router.get('/', authenticateToken, async (req, res) => {
       dateBought: game.date_bought || '',
       price: game.price ? parseFloat(game.price) : '',
       timePlayed: game.time_played || 0,
+      createdAt: game.created_at || null,
     }))
 
     res.json({ games: formattedGames })
@@ -113,6 +114,7 @@ router.post('/', authenticateToken, async (req, res) => {
       dateBought: newGame.date_bought || '',
       price: newGame.price ? parseFloat(newGame.price) : '',
       timePlayed: newGame.time_played || 0,
+      createdAt: newGame.created_at || null,
     }
 
     res.status(201).json({ game: formattedGame })
@@ -175,6 +177,7 @@ router.put('/:gameId', authenticateToken, async (req, res) => {
       dateBought: updatedGame.date_bought || '',
       price: updatedGame.price ? parseFloat(updatedGame.price) : '',
       timePlayed: updatedGame.time_played || 0,
+      createdAt: updatedGame.created_at || null,
     }
 
     res.json({ game: formattedGame })
