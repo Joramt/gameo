@@ -270,6 +270,10 @@ function Integrations() {
             imageUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${steamGame.appid}/library_600x900.jpg`
           }
           
+          // Convert playtime from Steam API (minutes) to store in database
+          // Steam API returns playtime_forever in minutes
+          const timePlayedMinutes = steamGame.playtime_forever || 0
+          
           // Add to database
           try {
             const addResponse = await fetch(`${API_URL}/api/games`, {
@@ -284,6 +288,7 @@ function Integrations() {
                 releaseDate: formattedReleaseDate,
                 studio: 'Unknown Studio',
                 steamAppId: String(steamGame.appid),
+                timePlayed: timePlayedMinutes,
               }),
             })
 
