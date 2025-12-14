@@ -54,6 +54,10 @@ app.use(express.json())
 // Request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`)
+  // Also log the full URL for debugging
+  if (req.path.includes('/api/auth')) {
+    console.log(`  Full URL: ${req.protocol}://${req.get('host')}${req.originalUrl}`)
+  }
   next()
 })
 
@@ -99,14 +103,42 @@ app.get('/health', (req, res) => {
 })
 
 // API Routes
-app.use('/api/steam', steamRouter)
-app.use('/api/auth', authRateLimiter, authRouter) // Auth routes have more lenient rate limiting
-app.use('/api/budget', budgetRouter)
-app.use('/api/integrations', integrationsRouter)
-app.use('/api/games', gamesRouter)
+try {
+  app.use('/api/steam', steamRouter)
+  console.log('✅ Registered /api/steam routes')
+  
+  app.use('/api/auth', authRateLimiter, authRouter)
+  console.log('✅ Registered /api/auth routes (with rate limiting)')
+  
+  app.use('/api/budget', budgetRouter)
+  console.log('✅ Registered /api/budget routes')
+  
+  app.use('/api/integrations', integrationsRouter)
+  console.log('✅ Registered /api/integrations routes')
+  
+  app.use('/api/games', gamesRouter)
+  console.log('✅ Registered /api/games routes')
+  
+  // Test route registration
+  app.get('/api/test', (req, res) => {
+    res.json({ message: 'API routes are working', timestamp: new Date().toISOString() })
+  })
+  console.log('✅ Registered /api/test route')
+} catch (error) {
+  console.error('❌ Error registering routes:', error)
+}
+
+// Debug middleware - log all unmatched routes
+app.use((req, res, next) => {
+  console.log(`⚠️ Unmatched route: ${req.method} ${req.path}`)
+  console.log(`   Original URL: ${req.originalUrl}`)
+  console.log(`   Base URL: ${req.baseUrl}`)
+  next()
+})
 
 // 404 handler
 app.use((req, res) => {
+  console.error(`❌ 404 - Endpoint not found: ${req.method} ${req.path}`)
   res.status(404).json({ error: 'Endpoint not found' })
 })
 
