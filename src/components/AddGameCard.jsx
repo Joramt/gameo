@@ -39,19 +39,19 @@ function AddGameCard({ onClick, isEmptyState = false, steamConnected = false, na
           <p className="text-gray-500 text-xs mt-3">
             Or{' '}
             {steamConnected ? (
-              <button
+              <span
                 onClick={handleSteamLinkClick}
-                className="text-purple-400 hover:text-purple-300 underline transition-colors"
+                className="text-purple-400 hover:text-purple-300 underline transition-colors cursor-pointer"
               >
                 synchronize your Steam library
-              </button>
+              </span>
             ) : (
-              <button
+              <span
                 onClick={handleSteamLinkClick}
-                className="text-purple-400 hover:text-purple-300 underline transition-colors"
+                className="text-purple-400 hover:text-purple-300 underline transition-colors cursor-pointer"
               >
                 connect and synchronize your Steam library
-              </button>
+              </span>
             )}
           </p>
         </div>

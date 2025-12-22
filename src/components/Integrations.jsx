@@ -6,6 +6,81 @@ import Navigation from './Navigation'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
+// Fun gaming facts component - cube modal
+const GamingFacts = ({ facts, rotationDirection }) => {
+  // Use first 6 facts for the 6 faces of the cube
+  const cubeFacts = facts.slice(0, 6)
+  const cubeSize = 200 // Half the cube size for translateZ
+  
+  // Modal face component
+  const ModalFace = ({ fact, transform }) => (
+    <div 
+      className="absolute w-full h-full overflow-hidden"
+      style={{ 
+        transform: transform,
+        backfaceVisibility: 'hidden',
+        WebkitBackfaceVisibility: 'hidden',
+        borderRadius: '1em'
+      }}
+    >
+      {/* Gradient border effect */}
+      <div className="absolute inset-0 bg-gradient-to-r from-purple-500/40 via-pink-500/40 to-purple-500/40 blur-xl opacity-40" style={{ borderRadius: '1em' }}></div>
+      
+      {/* Main modal container */}
+      <div className="relative h-full shadow-2xl overflow-hidden flex flex-col" style={{ borderRadius: '1em' }}>
+        {/* Animated background gradient with reduced opacity */}
+        <div className="absolute inset-0 animated-gradient opacity-15" style={{ borderRadius: '1em' }}></div>
+        
+        {/* Content container with backdrop blur */}
+        <div className="relative flex-1 flex flex-col justify-center bg-black/30 backdrop-blur-lg p-6 md:p-8" style={{ borderRadius: '1em' }}>
+          {/* Subtle gradient top border */}
+          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-purple-500/50 to-transparent"></div>
+          
+          <div className="relative z-10 text-center">
+            <p className="text-purple-300 text-xs mb-4 font-semibold">💡 DID YOU KNOW?</p>
+            <p className="text-gray-200 text-sm text-center px-4">{fact}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+  
+  return (
+    <div className="relative w-full h-full flex items-center justify-center perspective-1000 overflow-hidden" style={{ minHeight: '400px' }}>
+      <div 
+        className="relative preserve-3d transition-transform duration-1000 ease-in-out"
+        style={{
+          width: `${cubeSize * 2}px`,
+          height: `${cubeSize * 2}px`,
+          transform: rotationDirection
+        }}
+      >
+        {/* Front face */}
+        <ModalFace fact={cubeFacts[0]} transform={`rotateY(0deg) translateZ(${cubeSize}px)`} />
+        {/* Back face */}
+        <ModalFace fact={cubeFacts[1]} transform={`rotateY(180deg) translateZ(${cubeSize}px)`} />
+        {/* Right face */}
+        <ModalFace fact={cubeFacts[2]} transform={`rotateY(90deg) translateZ(${cubeSize}px)`} />
+        {/* Left face */}
+        <ModalFace fact={cubeFacts[3]} transform={`rotateY(-90deg) translateZ(${cubeSize}px)`} />
+        {/* Top face */}
+        <ModalFace fact={cubeFacts[4]} transform={`rotateX(90deg) translateZ(${cubeSize}px)`} />
+        {/* Bottom face */}
+        <ModalFace fact={cubeFacts[5]} transform={`rotateX(-90deg) translateZ(${cubeSize}px)`} />
+      </div>
+      <style>{`
+        .perspective-1000 {
+          perspective: 1200px;
+          perspective-origin: center center;
+        }
+        .preserve-3d {
+          transform-style: preserve-3d;
+        }
+      `}</style>
+    </div>
+  )
+}
+
 function Integrations() {
   const { isAuthenticated, user, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
@@ -13,11 +88,13 @@ function Integrations() {
   const [searchParams, setSearchParams] = useSearchParams()
   const isOnDashboard = location.pathname === '/dashboard'
   const [steamConnected, setSteamConnected] = useState(false)
+  const [psnConnected, setPsnConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, currentGame: '' })
   const [syncLog, setSyncLog] = useState([]) // Array of { gameName, status: 'syncing' | 'synced' | 'skipped', displayedName: string }
   const syncLogContainerRef = useRef(null)
+  const [currentSyncService, setCurrentSyncService] = useState(null) // 'steam' or 'psn'
   
   // Auto-scroll log to bottom when new items are added
   useEffect(() => {
@@ -29,9 +106,11 @@ function Integrations() {
   const [message, setMessage] = useState(null)
   const [showHowItWorks, setShowHowItWorks] = useState(true)
   const [isSteamSynchronized, setIsSteamSynchronized] = useState(false)
-  const [syncSuccessModal, setSyncSuccessModal] = useState({ show: false, addedCount: 0, skippedCount: 0 })
+  const [syncSuccessModal, setSyncSuccessModal] = useState({ show: false, addedCount: 0, skippedCount: 0, message: '' })
   const [syncCounts, setSyncCounts] = useState({ addedCount: 0, skippedCount: 0 })
-  const [errorModal, setErrorModal] = useState({ show: false, message: '' })
+  const [errorModal, setErrorModal] = useState({ show: false, message: '', onConfirm: null })
+  const [showPsnAuthModal, setShowPsnAuthModal] = useState(false)
+  const [npssoToken, setNpssoToken] = useState('')
   const [isLoadingConnections, setIsLoadingConnections] = useState(true)
   const [steamHasSynced, setSteamHasSynced] = useState(false)
 
@@ -40,6 +119,7 @@ function Integrations() {
       navigate('/')
     }
   }, [isAuthenticated, authLoading, navigate])
+
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -84,6 +164,9 @@ function Integrations() {
         const steamConnection = data.connections?.find(c => c.service === 'steam')
         const connected = !!steamConnection
         setSteamConnected(connected)
+        
+        const psnConnection = data.connections?.find(c => c.service === 'psn')
+        setPsnConnected(!!psnConnection)
         
         // Check if Steam has been synced before (from metadata)
         if (steamConnection?.metadata?.synced) {
@@ -153,6 +236,8 @@ function Integrations() {
         await fetchConnections()
         if (service === 'steam') {
           setSteamConnected(false)
+        } else if (service === 'psn') {
+          setPsnConnected(false)
         }
       }
     } catch (error) {
@@ -160,7 +245,320 @@ function Integrations() {
     }
   }
 
+  const handlePsnConnect = async () => {
+    if (!npssoToken.trim()) {
+      setErrorModal({ show: true, message: 'Please enter your NPSSO token', onConfirm: null })
+      return
+    }
+
+    setIsConnecting(true)
+    try {
+      const token = localStorage.getItem('auth_token')
+      const response = await fetch(`${API_URL}/api/integrations/psn/auth`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ npsso: npssoToken.trim() }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        setShowPsnAuthModal(false)
+        setNpssoToken('')
+        await fetchConnections()
+        setMessage({ type: 'success', text: 'PSN account connected successfully!' })
+      } else {
+        console.error('PSN auth error response:', data)
+        setErrorModal({ show: true, message: data.error || 'Failed to connect to PSN. Please check your NPSSO token and try again.', onConfirm: null })
+      }
+    } catch (error) {
+      console.error('Error connecting to PSN:', error)
+      setErrorModal({ show: true, message: `An error occurred while connecting to PSN: ${error.message}. Please try again.`, onConfirm: null })
+    } finally {
+      setIsConnecting(false)
+    }
+  }
+
+
+  const [isFetchingLibrary, setIsFetchingLibrary] = useState(false)
+  // Cube rotation state - tracks current face index (0-5 for 6 faces)
+  const [currentFaceIndex, setCurrentFaceIndex] = useState(0)
+  const currentFaceIndexRef = useRef(0)
+  
+  const gamingFacts = [
+    "🎮 The first video game, 'Pong', was released in 1972 and had no sound effects!",
+    "🎯 The average gamer has been playing for 13 years and owns 2.4 gaming devices.",
+    "🌍 Over 3 billion people worldwide play video games - that's almost half the planet!",
+    "💰 The gaming industry is worth more than the movie and music industries combined.",
+    "⏱️ The longest video game marathon lasted 138 hours and 34 seconds!",
+    "🎨 Minecraft has sold over 300 million copies, making it the best-selling game of all time.",
+  ]
+  
+  // Define rotation sequence for the 6 cube faces
+  // Each rotation changes only ONE axis by exactly 90 degrees
+  // Sequence to show all 6 unique facts: Front -> Right -> Back -> Front -> Left -> Front -> Top -> Front -> Bottom
+  // Front is used as a transition point to allow smooth single-axis rotations
+  const cubeFaces = [
+    { x: 0, y: 0 },       // 0: Front face - starting position (fact 0)
+    { x: 0, y: 90 },      // 1: Right face - Y +90 (fact 2)
+    { x: 0, y: 180 },     // 2: Back face - Y +90 from right (fact 1)
+    { x: 0, y: 0 },       // 3: Front face - reset to front (fact 0)
+    { x: 0, y: -90 },     // 4: Left face - Y -90 (fact 3)
+    { x: 0, y: 0 },       // 5: Front face - reset to front (fact 0)
+    { x: 90, y: 0 },      // 6: Top face - X +90 (fact 4)
+    { x: 0, y: 0 },       // 7: Front face - reset to front (fact 0)
+    { x: -90, y: 0 },     // 8: Bottom face - X -90 (fact 5)
+  ]
+  
+  useEffect(() => {
+    if (!isSyncing && !isFetchingLibrary) {
+      setCurrentFaceIndex(0)
+      currentFaceIndexRef.current = 0
+      return
+    }
+    
+    // Rotate to next face every 4 seconds
+    const rotateToNextFace = () => {
+      // Move to next face in sequence, wrapping around
+      const nextIndex = (currentFaceIndexRef.current + 1) % cubeFaces.length
+      setCurrentFaceIndex(nextIndex)
+      currentFaceIndexRef.current = nextIndex
+    }
+    
+    const interval = setInterval(rotateToNextFace, 4000)
+    
+    // Set initial face (Front)
+    setCurrentFaceIndex(0)
+    currentFaceIndexRef.current = 0
+    
+    return () => clearInterval(interval)
+  }, [isSyncing, isFetchingLibrary])
+  
+  // Get rotation values for current face
+  const currentFace = cubeFaces[currentFaceIndex]
+  const rotationDirection = `rotateX(${currentFace.x}deg) rotateY(${currentFace.y}deg)`
+  
+  const handlePsnSync = async () => {
+    setCurrentSyncService('psn')
+    setIsSyncing(true)
+    setIsFetchingLibrary(true)
+    try {
+      const token = localStorage.getItem('auth_token')
+      console.log('Fetching PSN library - this may take a while for large libraries...')
+      const response = await fetch(`${API_URL}/api/integrations/psn/library`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      setIsFetchingLibrary(false)
+
+      if (response.ok) {
+        const data = await response.json()
+        const psnGames = data.games || []
+        console.log(`[PSN SYNC] Received ${psnGames.length} games from API`)
+        
+        // PROCESS ALL GAMES - NO FILTERING, NO PRE-CHECKS, NO DEDUPLICATION, NO EARLY RETURNS
+        // Process EVERY SINGLE GAME from the API response - backend will handle duplicates (409 errors)
+        const gamesToProcess = psnGames.filter(game => game && game.name) // Only filter out null/undefined games or games without names
+        const totalGames = gamesToProcess.length
+        console.log(`[PSN SYNC] ===== PROCESSING ALL ${totalGames} GAMES - NO FILTERING, NO LIMITS, NO EARLY RETURNS =====`)
+        console.log(`[PSN SYNC] Total games from API: ${psnGames.length}, Games to process: ${totalGames}`)
+        
+        // Set initial progress
+        setSyncProgress({ current: 0, total: totalGames, currentGame: '' })
+        const initialLogEntries = gamesToProcess.map((game) => ({
+          gameName: game.name || 'Unknown Game',
+          status: 'syncing',
+          displayedName: ''
+        }))
+        setSyncLog(initialLogEntries)
+        
+        // Start typewriter effects - gamesToProcess is already deduplicated, so no need for additional Set
+        initialLogEntries.forEach((logEntry) => {
+          // Capture values immediately to avoid closure issues
+          const logEntryGameName = logEntry?.gameName
+          let gameNameStr = 'Unknown Game'
+          if (logEntryGameName && typeof logEntryGameName !== 'function') {
+            gameNameStr = `${logEntryGameName}`
+          }
+          
+          // Typewriter effect in background (non-blocking)
+          (async () => {
+            // Re-capture inside async to ensure we have the right value
+            const targetGameName = `${gameNameStr}`
+            for (let j = 0; j <= targetGameName.length; j++) {
+              await new Promise(resolve => setTimeout(resolve, 60))
+              setSyncLog(prev => prev.map((item) => {
+                const itemGameName = item?.gameName
+                let itemGameNameStr = 'Unknown Game'
+                if (itemGameName && typeof itemGameName !== 'function') {
+                  itemGameNameStr = `${itemGameName}`
+                }
+                if (itemGameNameStr === targetGameName) {
+                  return { ...item, displayedName: targetGameName.substring(0, j) }
+                }
+                return item
+              }))
+            }
+          })()
+        })
+        
+        // Process ALL games in parallel - NO BATCHING, NO LIMITS, ALL GAMES, NO PRE-FILTERING
+        let addedCount = 0
+        let skippedCount = 0
+        
+        console.log(`[PSN SYNC] ===== STARTING TO PROCESS ALL ${gamesToProcess.length} GAMES =====`)
+        console.log(`[PSN SYNC] Processing ALL ${gamesToProcess.length} games in parallel - NO BATCHES, NO LIMITS`)
+        
+        // Process ALL games at once - EVERY SINGLE GAME WILL BE ATTEMPTED TO BE ADDED
+        const processPromises = gamesToProcess.map(async (game, index) => {
+          if (index % 50 === 0 || index < 5 || index >= gamesToProcess.length - 5) {
+            console.log(`[PSN SYNC] Processing game ${index + 1}/${gamesToProcess.length}: ${game.name || 'Unknown'}`)
+          }
+            const gameName = game.name || 'Unknown Game'
+            
+            // Format release date if available
+            let formattedReleaseDate = ''
+            if (game.releaseDate) {
+              try {
+                const releaseDate = new Date(game.releaseDate)
+                formattedReleaseDate = releaseDate.toLocaleDateString('en-US', {
+                  month: 'short',
+                  year: 'numeric'
+                })
+              } catch (e) {
+                // Invalid date, skip
+              }
+            }
+            
+            // Get game image - PSN API provides imageUrl
+            const imageUrl = game.imageUrl || ''
+            
+            // Get last played date
+            let lastPlayedDate = null
+            if (game.lastPlayedDate) {
+              try {
+                const lastPlayed = new Date(game.lastPlayedDate)
+                const now = new Date()
+                const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000)
+                if (!isNaN(lastPlayed.getTime()) && lastPlayed <= now && lastPlayed >= fiveYearsAgo) {
+                  lastPlayedDate = lastPlayed.toISOString()
+                }
+              } catch (e) {
+                // Invalid date, skip
+              }
+            }
+            
+            // Convert playtime if available (PSN API provides playDuration)
+            // playDuration is in seconds, convert to minutes
+            const timePlayedMinutes = game.playDuration ? Math.floor(game.playDuration / 60) : 0
+            
+            try {
+              const addResponse = await fetch(`${API_URL}/api/games`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  name: gameName,
+                  image: imageUrl,
+                  releaseDate: formattedReleaseDate,
+                  studio: game.publisher || 'Unknown Studio',
+                  timePlayed: timePlayedMinutes,
+                  lastPlayed: lastPlayedDate,
+                }),
+              })
+
+              if (addResponse.ok) {
+                addedCount++
+                if (index % 50 === 0 || index < 5 || index >= gamesToProcess.length - 5) {
+                  console.log(`[PSN SYNC] ✓ Added game ${index + 1}/${gamesToProcess.length}: ${gameName}`)
+                }
+                setSyncLog(prev => prev.map(item => 
+                  item.gameName === gameName && item.status === 'syncing'
+                    ? { ...item, status: 'synced' }
+                    : item
+                ))
+              } else if (addResponse.status === 409) {
+                // Game already exists in library - this is expected, skip it
+                skippedCount++
+                if (index % 50 === 0 || index < 5 || index >= gamesToProcess.length - 5) {
+                  console.log(`[PSN SYNC] ⊘ Skipped (already exists) game ${index + 1}/${gamesToProcess.length}: ${gameName}`)
+                }
+                setSyncLog(prev => prev.map(item => 
+                  item.gameName === gameName && item.status === 'syncing'
+                    ? { ...item, status: 'synced' }
+                    : item
+                ))
+              } else {
+                // Other error - still count as skipped but log it
+                skippedCount++
+                const errorText = await addResponse.text().catch(() => 'Unknown error')
+                console.error(`[PSN SYNC] ✗ Error adding game ${index + 1}/${gamesToProcess.length}: ${gameName} - Status: ${addResponse.status}, Error: ${errorText}`)
+                setSyncLog(prev => prev.map(item => 
+                  item.gameName === gameName && item.status === 'syncing'
+                    ? { ...item, status: 'synced' }
+                    : item
+                ))
+              }
+            } catch (error) {
+              console.error(`[PSN SYNC] Error adding game ${gameName}:`, error)
+              skippedCount++
+              setSyncLog(prev => prev.map(item => 
+                item.gameName === gameName && item.status === 'syncing'
+                  ? { ...item, status: 'synced' }
+                  : item
+              ))
+            }
+          return { gameName, success: true }
+        })
+        
+        console.log(`[PSN SYNC] ===== AWAITING ALL ${processPromises.length} PROMISES TO COMPLETE =====`)
+        const results = await Promise.all(processPromises)
+        console.log(`[PSN SYNC] ===== ALL ${results.length} GAMES PROCESSED =====`)
+        console.log(`[PSN SYNC] FINAL COUNT - Added: ${addedCount}, Skipped: ${skippedCount}, Total processed: ${results.length}`)
+        console.log(`[PSN SYNC] Expected total: ${gamesToProcess.length}, Actual processed: ${results.length}`)
+        
+        if (results.length !== gamesToProcess.length) {
+          console.error(`[PSN SYNC] ERROR: Processed ${results.length} games but expected ${gamesToProcess.length}`)
+        }
+        
+        // Mark all as synced
+        setSyncLog(prev => prev.map(item => 
+          item.status === 'syncing' ? { ...item, status: 'synced' } : item
+        ))
+        
+        setSyncProgress({ current: totalGames, total: totalGames, currentGame: 'Complete!' })
+        
+        // Mark sync as complete
+        await fetch(`${API_URL}/api/integrations/psn/sync-complete`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ addedCount, skippedCount }),
+        })
+        
+        await fetchConnections()
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        setErrorModal({ show: true, message: `Failed to sync PSN library: ${errorData.error || 'Unknown error'}`, onConfirm: null })
+      }
+    } catch (error) {
+      console.error('Error syncing PSN library:', error)
+        setErrorModal({ show: true, message: 'An error occurred while syncing your PSN library. Please try again.', onConfirm: null })
+    }
+  }
+
   const handleSteamSync = async () => {
+    setCurrentSyncService('steam')
     setIsSyncing(true)
     try {
       const token = localStorage.getItem('auth_token')
@@ -192,6 +590,20 @@ function Integrations() {
         // Filter out games that are already in library
         const gamesToAdd = steamGames.filter(game => !existingSteamIds.has(String(game.appid)))
         const totalGames = gamesToAdd.length
+        
+        // If no games to process, show success modal
+        if (totalGames === 0) {
+          setIsSyncing(false)
+          setTimeout(() => {
+            setSyncSuccessModal({ 
+              show: true, 
+              addedCount: 0, 
+              skippedCount: steamGames.length,
+              message: 'All games from your Steam library are already in your collection!' 
+            })
+          }, 100)
+          return
+        }
         
         // Set initial progress
         setIsSyncing(true)
@@ -475,11 +887,11 @@ function Integrations() {
         setSteamHasSynced(true)
       } else {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
-        setErrorModal({ show: true, message: `Failed to sync Steam library: ${errorData.error || 'Unknown error'}` })
+        setErrorModal({ show: true, message: `Failed to sync Steam library: ${errorData.error || 'Unknown error'}`, onConfirm: null })
       }
     } catch (error) {
       console.error('Error syncing Steam library:', error)
-      setErrorModal({ show: true, message: 'An error occurred while syncing your Steam library. Please try again.' })
+        setErrorModal({ show: true, message: 'An error occurred while syncing your Steam library. Please try again.', onConfirm: null })
     } finally {
       // Don't close the modal automatically - keep it open with console log visible
       // setIsSyncing(false) - removed to keep modal open
@@ -500,15 +912,18 @@ function Integrations() {
       color: 'from-blue-500 to-blue-600',
       connected: steamConnected,
     },
-    // Future services can be added here
-    // {
-    //   id: 'epic',
-    //   name: 'Epic Games',
-    //   description: 'Sync your Epic Games library',
-    //   icon: <EpicIcon />,
-    //   color: 'from-purple-500 to-purple-600',
-    //   connected: false,
-    // },
+    {
+      id: 'psn',
+      name: 'PlayStation Network',
+      description: 'Connect your PlayStation account to sync your game library',
+      icon: (
+        <svg className="w-10 h-10" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
+          <path d="M8.985 2.596v17.548l3.915 1.261V6.688c0-.69.304-1.151.794-1.151.497 0 .801.47.801 1.151v11.337l3.873 1.268V3.813c0-.616-.285-1.008-.795-1.008-.498 0-.803.389-.803 1.008v7.891l-3.915-1.261V2.596c0-.626-.29-1.008-.794-1.008-.499 0-.801.39-.801 1.008zm-4.952 5.62c-2.322.013-4.033 1.803-4.033 4.033 0 2.305 1.794 4.033 4.033 4.033 2.305 0 4.033-1.794 4.033-4.033 0-2.305-1.828-4.033-4.033-4.033zm-.005 6.585c-1.399 0-2.427-1.068-2.427-2.427 0-1.399 1.028-2.427 2.427-2.427 1.399 0 2.427 1.028 2.427 2.427 0 1.359-1.028 2.427-2.427 2.427zm17.972-5.168v9.063c0 .652.29 1.068.795 1.068.498 0 .794-.416.794-1.068V9.033c0-2.305-1.828-4.033-4.033-4.033-2.305 0-4.033 1.794-4.033 4.033v9.063c0 .652.29 1.068.795 1.068.498 0 .794-.416.794-1.068v-4.033h2.427c1.399 0 2.427-1.028 2.427-2.427 0-1.399-1.028-2.427-2.427-2.427h-2.427V9.033c0-1.399 1.028-2.427 2.427-2.427 1.399 0 2.427 1.028 2.427 2.427z"/>
+        </svg>
+      ),
+      color: 'from-blue-600 to-indigo-700',
+      connected: psnConnected,
+    },
   ]
 
   if (!isAuthenticated) return null
@@ -546,7 +961,7 @@ function Integrations() {
 
             {/* How it works - Collapsible */}
             <div 
-              className={`bg-blue-500/10 border border-blue-500/30 rounded-2xl mb-8 relative overflow-hidden transition-all duration-300 ease-in-out ${
+              className={`bg-blue-500/10 border border-blue-500/30 rounded-2xl relative overflow-hidden transition-all duration-300 ease-in-out ${
                 showHowItWorks 
                   ? 'opacity-100 max-h-[200px] p-4 md:p-6 pb-4 md:pb-6 mb-8' 
                   : 'opacity-0 max-h-0 p-0 mb-0 border-0'
@@ -656,18 +1071,18 @@ function Integrations() {
                           </button>
                         ) : (
                           <button
-                            onClick={service.id === 'steam' ? handleSteamConnect : undefined}
-                            disabled={isConnecting && service.id === 'steam'}
+                            onClick={service.id === 'steam' ? handleSteamConnect : service.id === 'psn' ? () => setShowPsnAuthModal(true) : undefined}
+                            disabled={isConnecting}
                             className={`px-6 py-2 bg-gradient-to-r ${service.color} text-white rounded-lg transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-lg text-sm font-medium`}
                           >
-                            {isConnecting && service.id === 'steam' ? 'Connecting...' : 'Connect'}
+                            {isConnecting ? 'Connecting...' : 'Connect'}
                           </button>
                         )}
 
-                        {/* Sync Button - Always visible for Steam, disabled if not connected or already synced */}
-                        {service.id === 'steam' && !isSteamSynchronized && (
+                        {/* Sync Button - Always visible for Steam/PSN, disabled if not connected or already synced */}
+                        {(service.id === 'steam' || service.id === 'psn') && !isSteamSynchronized && (
                           <button
-                            onClick={handleSteamSync}
+                            onClick={service.id === 'steam' ? handleSteamSync : handlePsnSync}
                             disabled={isSyncing || !service.connected || isLoadingConnections}
                             className={`px-4 py-2 text-white rounded-lg transition-all transform text-sm font-medium flex items-center justify-center space-x-2 shadow-lg ${
                               !service.connected || isSyncing || isLoadingConnections
@@ -736,20 +1151,45 @@ function Integrations() {
         isOpen={isSyncing}
         onClose={() => {
           setIsSyncing(false)
+          setIsFetchingLibrary(false)
           setSyncProgress({ current: 0, total: 0, currentGame: '' })
+          setCurrentSyncService(null)
         }}
-        title={syncProgress.current === syncProgress.total && syncProgress.total > 0 ? "Sync Complete" : "Syncing Your Steam Library"}
-        preventClose={syncProgress.current !== syncProgress.total || syncProgress.total === 0}
+        title={isFetchingLibrary 
+          ? `Fetching Your ${currentSyncService === 'steam' ? 'Steam' : 'PSN'} Library` 
+          : (syncProgress.current === syncProgress.total && syncProgress.total > 0 
+            ? "Sync Complete" 
+            : `Syncing Your ${currentSyncService === 'steam' ? 'Steam' : 'PSN'} Library`)}
+        preventClose={syncProgress.current !== syncProgress.total || syncProgress.total === 0 || isFetchingLibrary}
+        additionalContent={
+          <div className="relative w-full md:w-full md:max-w-md md:h-auto md:mx-4 md:max-h-[90vh] md:min-h-[400px]" style={{ border: '1px solid #e5e7eb' }}>
+            <GamingFacts facts={gamingFacts} rotationDirection={rotationDirection} />
+          </div>
+        }
       >
         <div className="space-y-6">
           <div>
-            <p className="text-gray-300 mb-4">
-              {syncProgress.total > 0 
-                ? `Importing game ${syncProgress.current} of ${syncProgress.total}`
-                : 'Preparing to sync your games...'}
-            </p>
-            
-            {/* Progress Bar */}
+            {isFetchingLibrary ? (
+                <div className="text-center">
+                  <p className="text-gray-300 mb-4">
+                    Fetching your game library from {currentSyncService === 'steam' ? 'Steam' : 'PlayStation Network'}...
+                  </p>
+                  <p className="text-gray-400 text-sm">
+                    This may take a while for large libraries. Please wait...
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-gray-300 mb-4">
+                    {syncProgress.total > 0 
+                      ? `Importing game ${syncProgress.current} of ${syncProgress.total}`
+                      : 'Preparing to sync your games...'}
+                  </p>
+                </>
+              )}
+              
+              {/* Progress Bar - only show when not fetching library */}
+            {!isFetchingLibrary && (
             <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden mb-4">
               <div 
                 className="bg-gradient-to-r from-purple-500 to-pink-500 h-full transition-all duration-300 ease-out"
@@ -760,6 +1200,7 @@ function Integrations() {
                 }}
               />
             </div>
+            )}
             <p className="text-gray-500 text-xs text-center mb-4">
               {syncProgress.current === syncProgress.total && syncProgress.total > 0
                 ? 'Sync complete! You can close this window.'
@@ -813,22 +1254,145 @@ function Integrations() {
         </div>
       </Modal>
 
+      {/* PSN NPSSO Token Modal */}
+      <Modal
+        isOpen={showPsnAuthModal}
+        onClose={() => {
+          setShowPsnAuthModal(false)
+          setNpssoToken('')
+        }}
+        title="Connect PlayStation Network"
+      >
+        <div className="space-y-4">
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mb-4">
+            <h4 className="text-blue-300 font-semibold mb-2 text-sm">How to obtain an authentication token:</h4>
+            <ol className="text-gray-300 text-xs space-y-1.5 list-decimal list-inside">
+              <li>Go to <a href="https://www.playstation.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">playstation.com</a> and sign in to your PlayStation account</li>
+              <li>While logged in, visit <a href="https://ca.account.sony.com/api/v1/ssocookie" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">https://ca.account.sony.com/api/v1/ssocookie</a> (opens in new tab)</li>
+              <li>You should see a JSON response with an "npsso" field</li>
+              <li>Copy the entire value of the "npsso" field (it should be a long string of characters)</li>
+              <li>Paste it in the field below and click "Connect"</li>
+            </ol>
+            <p className="text-gray-400 text-xs mt-3 italic">Note: If you see an error or login page, make sure you're signed into playstation.com in the same browser.</p>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              NPSSO Token
+            </label>
+            <input
+              type="text"
+              value={npssoToken}
+              onChange={(e) => setNpssoToken(e.target.value)}
+              placeholder="Paste your NPSSO token here"
+              className="w-full px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => {
+                setShowPsnAuthModal(false)
+                setNpssoToken('')
+              }}
+              className="px-6 py-2 bg-gray-700/50 hover:bg-gray-700 text-white font-semibold rounded-xl transition-all"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handlePsnConnect}
+              disabled={isConnecting || !npssoToken.trim()}
+              className="px-6 py-2 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-indigo-800 transition-all transform hover:scale-[1.02] shadow-lg shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            >
+              {isConnecting ? 'Connecting...' : 'Connect'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Sync Success Modal */}
+      <Modal
+        isOpen={syncSuccessModal.show}
+        onClose={() => setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0, message: '' })}
+        title="Sync Complete"
+      >
+        <div className="space-y-4">
+          {syncSuccessModal.message ? (
+            <p className="text-gray-300">{syncSuccessModal.message}</p>
+          ) : (
+            <>
+              {syncSuccessModal.addedCount > 0 ? (
+                <p className="text-gray-300">
+                  Successfully synced {syncSuccessModal.addedCount} {syncSuccessModal.addedCount === 1 ? 'game' : 'games'} from {currentSyncService === 'steam' ? 'Steam' : 'PlayStation Network'}
+                  {syncSuccessModal.skippedCount > 0 && (
+                    <span className="text-gray-400"> ({syncSuccessModal.skippedCount} already in library)</span>
+                  )}
+                </p>
+              ) : (
+                <p className="text-gray-300">
+                  All games are already in your library
+                </p>
+              )}
+            </>
+          )}
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0, message: '' })}
+              className="px-6 py-2 bg-gray-700/50 hover:bg-gray-700 text-white font-semibold rounded-xl transition-all"
+            >
+              OK
+            </button>
+            {!isOnDashboard && (
+              <button
+                onClick={() => {
+                  setSyncSuccessModal({ show: false, addedCount: 0, skippedCount: 0, message: '' })
+                  navigate('/dashboard')
+                }}
+                className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-[1.02] shadow-lg shadow-purple-500/25"
+              >
+                Return to Dashboard
+              </button>
+            )}
+          </div>
+        </div>
+      </Modal>
 
       {/* Error Modal */}
       <Modal
         isOpen={errorModal.show}
-        onClose={() => setErrorModal({ show: false, message: '' })}
+        onClose={() => setErrorModal({ show: false, message: '', onConfirm: null })}
         title="Error"
       >
         <div className="space-y-4">
           <p className="text-gray-300">{errorModal.message}</p>
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-3">
             <button
-              onClick={() => setErrorModal({ show: false, message: '' })}
+              onClick={() => setErrorModal({ show: false, message: '', onConfirm: null })}
               className="px-6 py-2 bg-gray-700/50 hover:bg-gray-700 text-white font-medium rounded-xl transition-colors"
             >
-              OK
+              Cancel
             </button>
+            {errorModal.onConfirm && (
+              <button
+                onClick={() => {
+                  if (errorModal.onConfirm) {
+                    errorModal.onConfirm()
+                  }
+                  setErrorModal({ show: false, message: '', onConfirm: null })
+                }}
+                className="px-6 py-2 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-medium rounded-xl hover:from-blue-700 hover:to-indigo-800 transition-colors"
+              >
+                Sign In to PSN
+              </button>
+            )}
+            {!errorModal.onConfirm && (
+              <button
+                onClick={() => setErrorModal({ show: false, message: '', onConfirm: null })}
+                className="px-6 py-2 bg-gray-700/50 hover:bg-gray-700 text-white font-medium rounded-xl transition-colors"
+              >
+                OK
+              </button>
+            )}
           </div>
         </div>
       </Modal>

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-function Modal({ isOpen, onClose, children, title, preventClose = false }) {
+function Modal({ isOpen, onClose, children, title, preventClose = false, additionalContent }) {
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden'
@@ -30,7 +30,7 @@ function Modal({ isOpen, onClose, children, title, preventClose = false }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center md:items-start md:pt-20 md:pt-32 bg-black/60 backdrop-blur-md"
+      className={`fixed inset-0 z-50 flex items-center justify-center md:items-start md:pt-20 md:pt-32 bg-black/60 backdrop-blur-md ${additionalContent ? 'md:flex-row md:justify-around md:gap-6' : ''}`}
       onClick={(e) => {
         if (e.target === e.currentTarget && !preventClose) {
           onClose()
@@ -107,6 +107,7 @@ function Modal({ isOpen, onClose, children, title, preventClose = false }) {
           </div>
         </div>
       </div>
+      {additionalContent && additionalContent}
     </div>
   )
 }
