@@ -52,26 +52,30 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     // Format the response
-    const formattedPosts = (posts || []).map(post => ({
-      id: post.id,
-      title: post.title,
-      description: post.description,
-      createdAt: post.created_at,
-      updatedAt: post.updated_at,
-      author: {
-        id: post.user_profiles?.id,
-        name: post.user_profiles?.display_name,
-        email: post.user_profiles?.email
-      },
-      game: post.user_games ? {
-        id: post.user_games.id,
-        name: post.user_games.name,
-        image: post.user_games.image,
-        steamAppId: post.user_games.steam_app_id,
-        psnId: post.user_games.psn_id,
-        psnPlatform: post.user_games.psn_platform
-      } : null
-    }))
+    const formattedPosts = (posts || []).map(post => {
+      // Handle both possible response structures from Supabase
+      const authorData = post.user_profiles || (Array.isArray(post.user_profiles) && post.user_profiles[0]) || null
+      return {
+        id: post.id,
+        title: post.title,
+        description: post.description,
+        createdAt: post.created_at,
+        updatedAt: post.updated_at,
+        author: {
+          id: authorData?.id,
+          name: authorData?.display_name || authorData?.name || 'Unknown',
+          email: authorData?.email
+        },
+        game: post.user_games ? {
+          id: post.user_games.id,
+          name: post.user_games.name,
+          image: post.user_games.image,
+          steamAppId: post.user_games.steam_app_id,
+          psnId: post.user_games.psn_id,
+          psnPlatform: post.user_games.psn_platform
+        } : null
+      }
+    })
 
     res.json({ 
       posts: formattedPosts,
@@ -151,6 +155,7 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     // Format the response
+    const authorData = post.user_profiles || (Array.isArray(post.user_profiles) && post.user_profiles[0]) || null
     const formattedPost = {
       id: post.id,
       title: post.title,
@@ -158,9 +163,9 @@ router.post('/', authenticateToken, async (req, res) => {
       createdAt: post.created_at,
       updatedAt: post.updated_at,
       author: {
-        id: post.user_profiles?.id,
-        name: post.user_profiles?.display_name,
-        email: post.user_profiles?.email
+        id: authorData?.id,
+        name: authorData?.display_name || authorData?.name || 'Unknown',
+        email: authorData?.email
       },
       game: post.user_games ? {
         id: post.user_games.id,
@@ -251,6 +256,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 
     // Format the response
+    const authorData = post.user_profiles || (Array.isArray(post.user_profiles) && post.user_profiles[0]) || null
     const formattedPost = {
       id: post.id,
       title: post.title,
@@ -258,9 +264,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
       createdAt: post.created_at,
       updatedAt: post.updated_at,
       author: {
-        id: post.user_profiles?.id,
-        name: post.user_profiles?.display_name,
-        email: post.user_profiles?.email
+        id: authorData?.id,
+        name: authorData?.display_name || authorData?.name || 'Unknown',
+        email: authorData?.email
       },
       game: post.user_games ? {
         id: post.user_games.id,

@@ -40,17 +40,21 @@ router.get('/:postId/comments', authenticateToken, async (req, res) => {
     }
 
     // Format the response
-    const formattedComments = (comments || []).map(comment => ({
-      id: comment.id,
-      content: comment.content,
-      createdAt: comment.created_at,
-      updatedAt: comment.updated_at,
-      author: {
-        id: comment.user_profiles?.id,
-        name: comment.user_profiles?.display_name,
-        email: comment.user_profiles?.email
+    const formattedComments = (comments || []).map(comment => {
+      // Handle both possible response structures from Supabase
+      const authorData = comment.user_profiles || (Array.isArray(comment.user_profiles) && comment.user_profiles[0]) || null
+      return {
+        id: comment.id,
+        content: comment.content,
+        createdAt: comment.created_at,
+        updatedAt: comment.updated_at,
+        author: {
+          id: authorData?.id,
+          name: authorData?.display_name || authorData?.name || 'Unknown',
+          email: authorData?.email
+        }
       }
-    }))
+    })
 
     res.json({ comments: formattedComments })
   } catch (error) {
@@ -171,15 +175,16 @@ router.post('/:postId/comments', authenticateToken, async (req, res) => {
     }
 
     // Format the response
+    const authorData = comment.user_profiles || (Array.isArray(comment.user_profiles) && comment.user_profiles[0]) || null
     const formattedComment = {
       id: comment.id,
       content: comment.content,
       createdAt: comment.created_at,
       updatedAt: comment.updated_at,
       author: {
-        id: comment.user_profiles?.id,
-        name: comment.user_profiles?.display_name,
-        email: comment.user_profiles?.email
+        id: authorData?.id,
+        name: authorData?.display_name || authorData?.name || 'Unknown',
+        email: authorData?.email
       }
     }
 
@@ -251,15 +256,16 @@ router.put('/:postId/comments/:commentId', authenticateToken, async (req, res) =
     }
 
     // Format the response
+    const authorData = comment.user_profiles || (Array.isArray(comment.user_profiles) && comment.user_profiles[0]) || null
     const formattedComment = {
       id: comment.id,
       content: comment.content,
       createdAt: comment.created_at,
       updatedAt: comment.updated_at,
       author: {
-        id: comment.user_profiles?.id,
-        name: comment.user_profiles?.display_name,
-        email: comment.user_profiles?.email
+        id: authorData?.id,
+        name: authorData?.display_name || authorData?.name || 'Unknown',
+        email: authorData?.email
       }
     }
 

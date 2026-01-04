@@ -106,9 +106,10 @@ function Navigation() {
                   />
                   <div className="absolute right-0 mt-2 w-48 bg-gray-800/95 backdrop-blur-md rounded-lg shadow-xl border border-gray-700/50 py-2 z-50">
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         setShowUserMenu(false)
-                        logout()
+                        await logout()
+                        navigate('/', { replace: true })
                       }}
                       className="w-full text-left px-4 py-2 text-red-400 hover:bg-gray-700/50 transition-colors flex items-center space-x-2"
                     >
