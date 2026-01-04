@@ -5,6 +5,39 @@ import jwt from 'jsonwebtoken'
 
 const router = express.Router()
 
+// Helper function to parse ISO 8601 duration (PT228H56M33S) to total minutes
+function parseISODurationToMinutes(durationString) {
+  if (!durationString || typeof durationString !== 'string') return 0
+  
+  // ISO 8601 duration format: PT228H56M33S (P = period, T = time, H = hours, M = minutes, S = seconds)
+  const hoursMatch = durationString.match(/(\d+)H/)
+  const minutesMatch = durationString.match(/(\d+)M/)
+  const secondsMatch = durationString.match(/(\d+)S/)
+  
+  const hours = hoursMatch ? parseInt(hoursMatch[1], 10) : 0
+  const minutes = minutesMatch ? parseInt(minutesMatch[1], 10) : 0
+  const seconds = secondsMatch ? parseInt(secondsMatch[1], 10) : 0
+  
+  // Convert to total minutes (rounding seconds)
+  return Math.floor(hours * 60 + minutes + seconds / 60)
+}
+
+// Helper function to map category to platform
+function categoryToPlatform(category) {
+  if (!category) return null
+  switch (category) {
+    case 'ps5_native_game':
+      return 'PS5'
+    case 'ps4_game':
+      return 'PS4'
+    case 'pspc_game':
+      return 'PS3' // PSP/PS3 games
+    case 'unknown':
+    default:
+      return null
+  }
+}
+
 // Steam OpenID configuration
 const STEAM_OPENID_URL = 'https://steamcommunity.com/openid/login'
 const STEAM_API_KEY = process.env.STEAM_API_KEY || ''
@@ -548,6 +581,14 @@ router.post('/psn/auth', authenticateToken, async (req, res) => {
 
         if (insertError) {
           console.error('Error creating PSN connection:', insertError)
+          if (insertError.code === '42501') {
+            console.error('⚠️ RLS Error: Backend is using ANON_KEY instead of SERVICE_ROLE_KEY')
+            console.error('⚠️ Please add SUPABASE_SERVICE_ROLE_KEY to your .env file and restart the server')
+            return res.status(500).json({ 
+              error: 'Server configuration error: Please contact support',
+              hint: 'RLS policy violation - service role key required'
+            })
+          }
           return res.status(500).json({ error: 'Failed to create PSN connection' })
         }
       }
@@ -751,32 +792,53 @@ router.get('/psn/library', authenticateToken, async (req, res) => {
       }
       
       try {
-        console.log('Fetching user played games with access token and accountId:', accountId)
+        console.log('Fetching user played games with getUserPlayedGames, access token and accountId:', accountId)
         
-        // Fetch all games with pagination
-        playedGames = []
+        // Fetch all games with pagination using getUserPlayedGames (provides playtime, dates, platform)
+        const allFetchedGames = [] // Aggregate ALL games from ALL API calls
+        const gamesByName = new Map() // Map to merge games with same name but different platforms
         let offset = 0
-        const limit = 800 // Maximum per page according to psn-api docs
+        const limit = 200 // getUserPlayedGames typically uses smaller limit
         let hasMore = true
         let totalItemCount = 0
         
+        // Debug limit: if DEBUG_PSN_SYNC_LIMIT is set, only fetch that many games
+        const DEBUG_PSN_SYNC_LIMIT = process.env.DEBUG_PSN_SYNC_LIMIT ? parseInt(process.env.DEBUG_PSN_SYNC_LIMIT, 10) : null
+        if (DEBUG_PSN_SYNC_LIMIT && DEBUG_PSN_SYNC_LIMIT > 0) {
+          console.log(`⚠️ DEBUG MODE: PSN sync limited to first ${DEBUG_PSN_SYNC_LIMIT} games`)
+        }
+        
+        // Rate limiting: 500 requests/min (120ms between) OR 2000 requests/10min (300ms between)
+        // Use the more restrictive: 300ms delay to stay under 2000/10min limit
+        const MIN_DELAY_MS = 300
+        let requestCount = 0
+        
         while (hasMore) {
-          // getUserPlayedGames expects an object with accessToken property, and optional options for pagination
-          // Try with limit and offset first, fallback to start and size if needed
+          // Add delay between requests to avoid 429 errors
+          if (requestCount > 0) {
+            await new Promise(resolve => setTimeout(resolve, MIN_DELAY_MS))
+          }
+          
           let gamesResponse
           try {
+            requestCount++
+            console.log(`Attempting getUserPlayedGames API call #${requestCount} with offset=${offset}, limit=${limit}`)
             gamesResponse = await psnApi.getUserPlayedGames({ accessToken }, accountId, { limit, offset })
           } catch (err) {
-            // If limit/offset doesn't work, try start/size
-            try {
-              gamesResponse = await psnApi.getUserPlayedGames({ accessToken }, accountId, { start: offset, size: limit })
-            } catch (err2) {
-              // If options don't work, try without options for first page
-              if (offset === 0) {
-                gamesResponse = await psnApi.getUserPlayedGames({ accessToken }, accountId)
-              } else {
-                throw err2
+            // Check if it's a rate limit error
+            if (err.status === 429 || err.message?.includes('429') || err.message?.includes('rate limit')) {
+              console.log(`Rate limit hit (429), waiting 5 seconds before retry...`)
+              await new Promise(resolve => setTimeout(resolve, 5000))
+              // Retry the request
+              try {
+                gamesResponse = await psnApi.getUserPlayedGames({ accessToken }, accountId, { limit, offset })
+              } catch (retryErr) {
+                console.log(`getUserPlayedGames retry failed:`, retryErr.message)
+                throw retryErr
               }
+            } else {
+              console.log(`getUserPlayedGames failed:`, err.message)
+              throw err
             }
           }
           
@@ -785,71 +847,206 @@ router.get('/psn/library', authenticateToken, async (req, res) => {
           // Extract titles array from the response object
           if (gamesResponse?.titles && Array.isArray(gamesResponse.titles)) {
             const titlesInThisPage = gamesResponse.titles.length
-            playedGames = playedGames.concat(gamesResponse.titles)
             
-            // Update totalItemCount from response if available, otherwise use current length
+            // Log first title structure to see available fields
+            if (titlesInThisPage > 0 && requestCount === 1) {
+              console.log('Sample title object keys:', Object.keys(gamesResponse.titles[0]))
+              console.log('Sample title object:', JSON.stringify(gamesResponse.titles[0], null, 2).substring(0, 1500))
+            }
+            
+            // Check for Path of Exile in this page
+            const pathOfExileTitle = gamesResponse.titles.find(title => 
+              title.name && title.name.toLowerCase().includes('path of exile')
+            )
+            if (pathOfExileTitle) {
+              console.log(`🎮 FOUND Path of Exile in page at offset ${offset}:`, JSON.stringify(pathOfExileTitle, null, 2))
+            }
+            
+            // Map titles to expected format
+            gamesResponse.titles.forEach(title => {
+              const gameName = title.name || 'Unknown Game'
+              const gameNameLower = gameName.toLowerCase()
+              
+              // Filter out streaming services and apps
+              const streamingServices = [
+                'netflix', 'youtube', 'crunchyroll', 'ign', 'prime', 'disney', 'twitch', 
+                'lecteur multimedia', 'live events viewer', 'hulu', 'amazon prime', 
+                'hbo', 'max', 'paramount', 'peacock', 'apple tv', 'spotify', 
+                'playstation store', 'playstation video', 'playstation music'
+              ]
+              
+              // Skip if it's a streaming service
+              if (streamingServices.some(service => gameNameLower.includes(service))) {
+                return // Skip this game
+              }
+              
+              const platform = categoryToPlatform(title.category)
+              
+              // Parse playDuration from ISO 8601 format (PT228H56M33S)
+              const playDurationMinutes = parseISODurationToMinutes(title.playDuration)
+              
+              // Parse dates
+              let firstPlayedDate = null
+              if (title.firstPlayedDateTime) {
+                try {
+                  const date = new Date(title.firstPlayedDateTime)
+                  if (!isNaN(date.getTime())) {
+                    firstPlayedDate = date.toISOString().split('T')[0] // YYYY-MM-DD format for date_started
+                  }
+                } catch (e) {
+                  // Invalid date, skip
+                }
+              }
+              
+              let lastPlayedDate = null
+              if (title.lastPlayedDateTime) {
+                try {
+                  const date = new Date(title.lastPlayedDateTime)
+                  const now = new Date()
+                  const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000)
+                  if (!isNaN(date.getTime()) && date <= now && date >= fiveYearsAgo) {
+                    lastPlayedDate = date.toISOString()
+                  }
+                } catch (e) {
+                  // Invalid date, skip
+                }
+              }
+              
+              const gameData = {
+                name: gameName,
+                id: title.titleId || title.concept?.id?.toString() || null, // Use titleId or concept.id
+                imageUrl: title.imageUrl || title.localizedImageUrl || '',
+                publisher: 'Unknown Publisher', // getUserPlayedGames doesn't provide publisher
+                releaseDate: '', // getUserPlayedGames doesn't provide release date
+                lastPlayedDate: lastPlayedDate,
+                firstPlayedDate: firstPlayedDate,
+                playDuration: playDurationMinutes,
+                platform: platform,
+                category: title.category,
+                titleId: title.titleId
+              }
+              
+              allFetchedGames.push(gameData)
+              
+              // Merge games with same name but different platforms
+              if (gamesByName.has(gameNameLower)) {
+                const existing = gamesByName.get(gameNameLower)
+                // Merge platforms - if different platforms, combine them
+                if (platform && existing.platforms && !existing.platforms.includes(platform)) {
+                  existing.platforms.push(platform)
+                } else if (platform && !existing.platforms) {
+                  existing.platforms = [existing.platform, platform].filter(Boolean)
+                }
+                // Use the most recent last played date
+                if (lastPlayedDate && (!existing.lastPlayedDate || lastPlayedDate > existing.lastPlayedDate)) {
+                  existing.lastPlayedDate = lastPlayedDate
+                }
+                // Use the earliest first played date
+                if (firstPlayedDate && (!existing.firstPlayedDate || firstPlayedDate < existing.firstPlayedDate)) {
+                  existing.firstPlayedDate = firstPlayedDate
+                }
+                // Sum play durations
+                existing.playDuration = (existing.playDuration || 0) + playDurationMinutes
+                // Use best image (prefer non-localized)
+                if (title.imageUrl && !existing.imageUrl) {
+                  existing.imageUrl = title.imageUrl
+                }
+              } else {
+                gamesByName.set(gameNameLower, {
+                  ...gameData,
+                  platforms: platform ? [platform] : [],
+                  platform: platform // Keep for backward compatibility
+                })
+              }
+            })
+            
+            // Update totalItemCount from response if available
             if (gamesResponse.totalItemCount !== undefined && gamesResponse.totalItemCount !== null) {
               totalItemCount = gamesResponse.totalItemCount
             } else {
-              totalItemCount = Math.max(totalItemCount, playedGames.length)
+              totalItemCount = Math.max(totalItemCount, gamesByName.size)
             }
             
-            console.log(`Fetched page at offset ${offset}: ${titlesInThisPage} titles (total so far: ${playedGames.length}${totalItemCount > 0 ? `/${totalItemCount}` : ''})`)
+            const uniqueGamesSoFar = gamesByName.size
+            console.log(`Fetched page at offset ${offset}: ${titlesInThisPage} titles, ${uniqueGamesSoFar} unique games so far${totalItemCount > 0 ? `/${totalItemCount}` : ''}`)
+            
+            // Early exit if debug limit is reached
+            if (DEBUG_PSN_SYNC_LIMIT && DEBUG_PSN_SYNC_LIMIT > 0 && uniqueGamesSoFar >= DEBUG_PSN_SYNC_LIMIT) {
+              hasMore = false
+              console.log(`⚠️ DEBUG MODE: Reached debug limit of ${DEBUG_PSN_SYNC_LIMIT} games. Stopping pagination.`)
+            }
             
             // Check if there are more pages
-            // Continue if:
-            // 1. We got titles in this page AND nextOffset is defined and different from current offset
-            // 2. OR we got titles and totalItemCount indicates there are more
             if (titlesInThisPage > 0) {
-              // Check if we have more games to fetch based on totalItemCount
-              if (totalItemCount > 0 && playedGames.length < totalItemCount) {
-                // We haven't fetched all games yet, continue pagination
-                if (gamesResponse.nextOffset !== undefined && gamesResponse.nextOffset !== null) {
-                  // Use nextOffset if provided (even if same as current offset - API will handle it)
-                  offset = gamesResponse.nextOffset
+              if (totalItemCount > 0 && uniqueGamesSoFar < totalItemCount) {
+                const nextOffsetFromAPI = gamesResponse.nextOffset
+                const currentOffset = offset
+                
+                if (nextOffsetFromAPI !== undefined && nextOffsetFromAPI !== null && nextOffsetFromAPI !== currentOffset && nextOffsetFromAPI > currentOffset) {
+                  offset = nextOffsetFromAPI
                   hasMore = true
-                  console.log(`Has more pages. Next offset: ${offset} (fetched ${playedGames.length}/${totalItemCount})`)
+                  console.log(`Has more pages. Using API nextOffset: ${offset} (was ${currentOffset}, unique games: ${uniqueGamesSoFar}/${totalItemCount})`)
                 } else {
-                  // No nextOffset but we haven't fetched all - increment offset manually
-                  offset = offset + titlesInThisPage
-                  hasMore = true
-                  console.log(`No nextOffset, incrementing manually. Next offset: ${offset} (fetched ${playedGames.length}/${totalItemCount})`)
+                  const newOffset = currentOffset + titlesInThisPage
+                  if (newOffset < totalItemCount && newOffset > currentOffset) {
+                    offset = newOffset
+                    hasMore = true
+                    console.log(`nextOffset invalid/same (${nextOffsetFromAPI}), incrementing manually. New offset: ${offset} (was ${currentOffset}, unique games: ${uniqueGamesSoFar}/${totalItemCount})`)
+                  } else {
+                    hasMore = false
+                    console.log(`No more pages (offset: ${offset}, total: ${totalItemCount}, unique: ${uniqueGamesSoFar})`)
+                  }
                 }
-              } else {
-                // We've fetched all games (or totalItemCount is 0/invalid)
+              } else if (titlesInThisPage < limit) {
+                // If we got fewer titles than the limit, we're done
                 hasMore = false
-                console.log(`Fetched all games. Total titles fetched: ${playedGames.length}${totalItemCount > 0 ? `/${totalItemCount}` : ''}`)
+                console.log(`Got fewer titles (${titlesInThisPage}) than limit (${limit}), stopping pagination`)
+              } else {
+                // Continue pagination
+                const newOffset = offset + titlesInThisPage
+                offset = newOffset
+                hasMore = true
               }
             } else {
-              // No titles in this page, we're done
               hasMore = false
-              console.log(`No titles in this page. Total titles fetched: ${playedGames.length}`)
+              console.log(`No titles in page, stopping pagination`)
             }
-          } else if (Array.isArray(gamesResponse)) {
-            // Fallback: if response is already an array
-            playedGames = playedGames.concat(gamesResponse)
-            hasMore = false
-            console.log(`Response is array. Total titles fetched: ${playedGames.length}`)
+            
+            // Safety check: stop when we have all unique games or made too many requests
+            if (totalItemCount > 0 && uniqueGamesSoFar >= totalItemCount) {
+              hasMore = false
+              console.log(`Reached total item count (${totalItemCount}). Stopping pagination.`)
+            }
+            
+            // Additional safety check: if we've made many requests, stop
+            const MAX_REQUESTS = 1800 // Stay under 2000/10min limit
+            if (requestCount >= MAX_REQUESTS) {
+              hasMore = false
+              console.log(`Reached safety limit of ${MAX_REQUESTS} requests (under 2000/10min limit). Stopping pagination.`)
+            }
           } else {
             console.log('Unexpected response structure:', JSON.stringify(gamesResponse, null, 2).substring(0, 500))
             hasMore = false
           }
-          
-          // Safety check to prevent infinite loops
-          if (totalItemCount > 0 && playedGames.length >= totalItemCount) {
-            hasMore = false
-            console.log(`Reached total item count (${totalItemCount}). Stopping pagination.`)
-          }
-          
-          // Additional safety check: if we've made many requests, stop (prevent infinite loops)
-          const maxRequests = 50 // Safety limit
-          if (offset / limit > maxRequests) {
-            hasMore = false
-            console.log(`Reached safety limit of ${maxRequests} requests. Stopping pagination.`)
-          }
         }
         
+        // Convert Map to array, merging platforms into a single platform string
+        playedGames = Array.from(gamesByName.values()).map(game => ({
+          ...game,
+          platform: game.platforms && game.platforms.length > 0 ? game.platforms.join(', ') : game.platform || null,
+          platforms: game.platforms // Keep platforms array for reference
+        }))
+        
         console.log(`Successfully fetched ${playedGames.length} played games (totalItemCount: ${totalItemCount})`)
+        
+        // Apply debug limit if DEBUG_PSN_SYNC_LIMIT is set (final safety check in case early exit didn't trigger)
+        if (DEBUG_PSN_SYNC_LIMIT && DEBUG_PSN_SYNC_LIMIT > 0 && playedGames.length > DEBUG_PSN_SYNC_LIMIT) {
+          const originalCount = playedGames.length
+          playedGames = playedGames.slice(0, DEBUG_PSN_SYNC_LIMIT)
+          console.log(`⚠️ DEBUG MODE: Limited PSN sync to first ${DEBUG_PSN_SYNC_LIMIT} games (out of ${originalCount} total games)`)
+        }
+        
+        // Games will be enriched one by one in the frontend before being added to the library
       } catch (gamesError) {
         console.error('Error fetching user played games:', gamesError)
         throw gamesError
@@ -857,7 +1054,7 @@ router.get('/psn/library', authenticateToken, async (req, res) => {
 
       res.json({
         games: playedGames || [],
-        purchasedGames: [], // Removed purchased games fetch - only using getUserTitles
+        purchasedGames: [], // Removed purchased games fetch - only using getUserPlayedGames
         game_count: playedGames?.length || 0
       })
     } catch (libraryError) {

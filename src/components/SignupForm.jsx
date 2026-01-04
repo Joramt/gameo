@@ -5,6 +5,9 @@ function SignupForm({ onSwitchToLogin, onClose }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [country, setCountry] = useState('US')
+  const [language, setLanguage] = useState('en')
+  const [ageGroup, setAgeGroup] = useState('')
   const [localError, setLocalError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { signup, error: authError } = useAuth()
@@ -15,7 +18,7 @@ function SignupForm({ onSwitchToLogin, onClose }) {
     setIsSubmitting(true)
 
     try {
-      if (!name || !email || !password) {
+      if (!name || !email || !password || !country || !language || !ageGroup) {
         setLocalError('Please fill in all fields')
         setIsSubmitting(false)
         return
@@ -27,7 +30,7 @@ function SignupForm({ onSwitchToLogin, onClose }) {
         return
       }
 
-      const result = await signup(name, email, password)
+      const result = await signup(name, email, password, country, language, ageGroup)
       console.log('Signup result:', result)
       
       if (result.success) {
@@ -98,6 +101,85 @@ function SignupForm({ onSwitchToLogin, onClose }) {
               disabled={isSubmitting}
             />
             <p className="text-gray-500 text-xs mt-1.5">At least 6 characters</p>
+          </div>
+
+          <div>
+            <label htmlFor="country" className="block text-white text-sm font-medium mb-2">
+              Country
+            </label>
+            <select
+              id="country"
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              className="w-full px-4 py-3 bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all"
+              disabled={isSubmitting}
+              required
+            >
+              <option value="US">United States</option>
+              <option value="GB">United Kingdom</option>
+              <option value="CA">Canada</option>
+              <option value="FR">France</option>
+              <option value="DE">Germany</option>
+              <option value="ES">Spain</option>
+              <option value="IT">Italy</option>
+              <option value="JP">Japan</option>
+              <option value="AU">Australia</option>
+              <option value="BR">Brazil</option>
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="language" className="block text-white text-sm font-medium mb-2">
+              Language
+            </label>
+            <select
+              id="language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="w-full px-4 py-3 bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all"
+              disabled={isSubmitting}
+              required
+            >
+              <option value="en">English</option>
+              <option value="fr">Français</option>
+              <option value="es">Español</option>
+              <option value="de">Deutsch</option>
+              <option value="it">Italiano</option>
+              <option value="ja">日本語</option>
+              <option value="pt">Português</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-white text-sm font-medium mb-2">
+              Age
+            </label>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setAgeGroup('under18')}
+                disabled={isSubmitting}
+                className={`flex-1 px-4 py-3 rounded-xl text-white font-medium transition-all ${
+                  ageGroup === 'under18'
+                    ? 'bg-gradient-to-r from-purple-500 to-pink-500 border-2 border-purple-400'
+                    : 'bg-white/5 backdrop-blur-sm border border-white/10 hover:bg-white/10 hover:border-purple-500/50'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                Younger than 18 years old
+              </button>
+              <button
+                type="button"
+                onClick={() => setAgeGroup('over18')}
+                disabled={isSubmitting}
+                className={`flex-1 px-4 py-3 rounded-xl text-white font-medium transition-all ${
+                  ageGroup === 'over18'
+                    ? 'bg-gradient-to-r from-purple-500 to-pink-500 border-2 border-purple-400'
+                    : 'bg-white/5 backdrop-blur-sm border border-white/10 hover:bg-white/10 hover:border-purple-500/50'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                Older than 18 years old
+              </button>
+            </div>
           </div>
 
           <button

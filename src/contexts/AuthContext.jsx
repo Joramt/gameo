@@ -139,7 +139,7 @@ export const AuthProvider = ({ children }) => {
     }
   }
 
-  const signup = async (name, email, password) => {
+  const signup = async (name, email, password, country, language, ageGroup) => {
     try {
       setError(null)
       // Don't set global isLoading for login/signup - it blocks navigation
@@ -150,7 +150,7 @@ export const AuthProvider = ({ children }) => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name, email, password }),
+        body: JSON.stringify({ name, email, password, country, language, ageGroup }),
       })
 
       const data = await response.json()

@@ -1,12 +1,17 @@
+// CRITICAL: Import config.js FIRST to load environment variables
+// This must be the very first import
+import './config.js'
+
+// Now import everything else AFTER env vars are loaded
 import express from 'express'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
-import dotenv from 'dotenv'
 import { steamRouter } from './routes/steam.js'
 import { authRouter } from './routes/auth.js'
 import { budgetRouter } from './routes/budget.js'
 import { integrationsRouter } from './routes/integrations.js'
 import { gamesRouter } from './routes/games.js'
+import { gamesEnrichmentRouter } from './routes/gamesEnrichment.js'
 
 // Verify routes are loaded
 console.log('✅ Routes loaded:', {
@@ -16,8 +21,6 @@ console.log('✅ Routes loaded:', {
   integrations: !!integrationsRouter,
   games: !!gamesRouter
 })
-
-dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -61,10 +64,11 @@ app.use((req, res, next) => {
   next()
 })
 
-// Global rate limiting - More lenient for general API
+// Global rate limiting - Very lenient to handle large syncs (200+ games) plus normal operations
+// Users sync games one-by-one for console feedback, so we need high limits
 const globalRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300, // Limit each IP to 300 requests per windowMs (increased from 100)
+  max: 2500, // Limit each IP to 2500 requests per windowMs (allows 200+ games sync + normal operations)
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -117,6 +121,7 @@ try {
   console.log('✅ Registered /api/integrations routes')
   
   app.use('/api/games', gamesRouter)
+  app.use('/api/games', gamesEnrichmentRouter)
   console.log('✅ Registered /api/games routes')
   
   // Test route registration

@@ -16,15 +16,23 @@ if (!supabase) {
  */
 router.post('/signup', async (req, res) => {
   try {
-    const { name, email, password } = req.body
+    const { name, email, password, country, language, ageGroup } = req.body
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Name, email, and password are required' })
+    if (!name || !email || !password || !country || !language || !ageGroup) {
+      return res.status(400).json({ error: 'Name, email, password, country, language, and age are required' })
     }
 
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' })
     }
+
+    // Validate ageGroup
+    if (ageGroup !== 'under18' && ageGroup !== 'over18') {
+      return res.status(400).json({ error: 'Age must be either "under18" or "over18"' })
+    }
+
+    // Convert ageGroup to age: 5 for <18, 19 for 18+
+    const age = ageGroup === 'under18' ? 5 : 19
 
     if (!supabase) {
       return res.status(500).json({ error: 'Server configuration error' })
@@ -60,7 +68,7 @@ router.post('/signup', async (req, res) => {
     
     const { data: profile, error: profileError } = await supabase
       .from('user_profiles')
-      .select('id, email, display_name, created_at')
+      .select('id, email, display_name, created_at, country, language, age')
       .eq('id', authData.user.id)
       .single()
 
@@ -74,14 +82,37 @@ router.post('/signup', async (req, res) => {
             id: authData.user.id,
             email,
             display_name: name,
+            country,
+            language,
+            age,
           }
         ])
-        .select('id, email, display_name, created_at')
+        .select('id, email, display_name, created_at, country, language, age')
         .single()
 
       if (createError) {
         console.error('Manual profile creation error:', createError)
         return res.status(500).json({ error: 'Failed to create user profile' })
+      }
+      
+      // Update profile with country, language, age if it was created by trigger
+      const { error: updateError } = await supabase
+        .from('user_profiles')
+        .update({ country, language, age })
+        .eq('id', authData.user.id)
+      
+      if (updateError) {
+        console.error('Error updating profile with country/language/age:', updateError)
+      }
+    } else {
+      // Profile exists, update it with country, language, age
+      const { error: updateError } = await supabase
+        .from('user_profiles')
+        .update({ country, language, age })
+        .eq('id', authData.user.id)
+      
+      if (updateError) {
+        console.error('Error updating profile with country/language/age:', updateError)
       }
     }
 

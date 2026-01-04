@@ -17,6 +17,41 @@ function Dashboard() {
   const location = useLocation()
   const isOnDashboard = location.pathname === '/dashboard'
 
+  // State declarations - must be before functions that use them
+  const [recentGames, setRecentGames] = useState([])
+  const [lastWeekGames, setLastWeekGames] = useState([])
+  const [lastMonthGames, setLastMonthGames] = useState([])
+  const [allGames, setAllGames] = useState([])
+  const [allGamesRaw, setAllGamesRaw] = useState([]) // Store unfiltered games
+  const [availablePlatforms, setAvailablePlatforms] = useState([]) // Platforms user has games for
+  const [sortBy, setSortBy] = useState('recent') // 'recent' or 'played'
+  const [platformFilter, setPlatformFilter] = useState('all') // 'all' or platform name
+  const [isAddGameModalOpen, setIsAddGameModalOpen] = useState(false)
+  const [isGameInfoModalOpen, setIsGameInfoModalOpen] = useState(false)
+  const [selectedGame, setSelectedGame] = useState(null)
+  const [isTimeOnlyMode, setIsTimeOnlyMode] = useState(false)
+  const [isLoadingGames, setIsLoadingGames] = useState(true)
+  const gamesScrollRef = useRef(null)
+  const mobileScrollRef = useRef(null)
+  const touchStartX = useRef(0)
+  const touchStartY = useRef(0)
+  const [currentGameIndex, setCurrentGameIndex] = useState(0)
+  const isScrolling = useRef(false)
+  const [showSteamSyncModal, setShowSteamSyncModal] = useState(false)
+  const [isCheckingSteam, setIsCheckingSteam] = useState(true)
+  const [steamConnected, setSteamConnected] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, currentGame: '' })
+  const [syncLog, setSyncLog] = useState([]) // Array of { gameName, status: 'syncing' | 'synced' | 'skipped', displayedName: string }
+  const syncLogContainerRef = useRef(null)
+  const [showLeftFade, setShowLeftFade] = useState(false)
+  const [showRightFade, setShowRightFade] = useState(true)
+  const [syncSuccessModal, setSyncSuccessModal] = useState({ show: false, addedCount: 0, skippedCount: 0 })
+  const [errorModal, setErrorModal] = useState({ show: false, message: '' })
+  const [addGameErrorModal, setAddGameErrorModal] = useState({ show: false, message: '' })
+  const [removeGameErrorModal, setRemoveGameErrorModal] = useState({ show: false, message: '' })
+  const [gameAlreadyInLibraryModal, setGameAlreadyInLibraryModal] = useState(false)
+
   // Capitalize first letter of each word in a name
   const capitalizeName = (name) => {
     if (!name) return ''
@@ -25,8 +60,83 @@ function Dashboard() {
     ).join(' ')
   }
 
+  // Helper function to extract platforms from games
+  const extractPlatforms = (games) => {
+    const platforms = new Set()
+    games.forEach(game => {
+      if (game.steamAppId) {
+        platforms.add('Steam')
+      }
+      if (game.psnPlatform) {
+        // psnPlatform can be comma-separated like "PS4, PS5" or single like "PS5"
+        const psnPlatforms = game.psnPlatform.split(',').map(p => p.trim()).filter(Boolean)
+        psnPlatforms.forEach(p => platforms.add(p))
+      } else if (game.psnId) {
+        // Fallback if psnPlatform is not set but psnId exists
+        platforms.add('PSN')
+      }
+    })
+    return Array.from(platforms).sort()
+  }
+
+  // Helper function to check if game matches platform filter
+  const matchesPlatformFilter = (game, filter) => {
+    if (filter === 'all') return true
+    
+    if (filter === 'Steam') {
+      return !!game.steamAppId
+    }
+    
+    // For PSN platforms (PS4, PS5, PS3, etc.)
+    if (game.psnPlatform) {
+      const platforms = game.psnPlatform.split(',').map(p => p.trim())
+      return platforms.includes(filter)
+    } else if (game.psnId && filter === 'PSN') {
+      return true
+    }
+    
+    return false
+  }
+
+  // Helper function to sort and filter all games
+  const applySortAndFilter = (games, sortOption, filterOption) => {
+    // Filter by platform
+    let filtered = games.filter(game => matchesPlatformFilter(game, filterOption))
+    
+    // Sort games
+    if (sortOption === 'played') {
+      // Sort by time played (most played first)
+      filtered.sort((a, b) => {
+        const aTime = a.timePlayed || 0
+        const bTime = b.timePlayed || 0
+        return bTime - aTime
+      })
+    } else {
+      // Sort by last played (most recent first) - default
+      filtered.sort((a, b) => {
+        const aHasLastPlayed = !!a.lastPlayed
+        const bHasLastPlayed = !!b.lastPlayed
+        
+        // If one has lastPlayed and the other doesn't, prioritize the one with lastPlayed
+        if (aHasLastPlayed && !bHasLastPlayed) return -1
+        if (!aHasLastPlayed && bHasLastPlayed) return 1
+        
+        // Both have lastPlayed or both don't - sort by date
+        const aDate = a.lastPlayed ? new Date(a.lastPlayed) : (a.createdAt ? new Date(a.createdAt) : new Date(0))
+        const bDate = b.lastPlayed ? new Date(b.lastPlayed) : (b.createdAt ? new Date(b.createdAt) : new Date(0))
+        return bDate - aDate // Most recent first
+      })
+    }
+    
+    return filtered
+  }
+
   // Helper function to categorize games by last played date
   const categorizeGames = (games) => {
+    // Extract available platforms
+    const platforms = extractPlatforms(games)
+    setAvailablePlatforms(platforms)
+    
     // Sort games by last_played (most recent first), fallback to created_at
     // Games with lastPlayed always appear before games without lastPlayed
     const sortedGames = [...games].sort((a, b) => {
@@ -65,32 +175,22 @@ function Dashboard() {
     
     setLastWeekGames(lastWeek)
     setLastMonthGames(lastMonth)
-    setAllGames(sortedGames)
+    setAllGamesRaw(sortedGames) // Store unfiltered games
     setRecentGames(sortedGames) // Keep for compatibility
+    
+    // Apply initial sort and filter
+    const filteredAndSorted = applySortAndFilter(sortedGames, sortBy, platformFilter)
+    setAllGames(filteredAndSorted)
   }
 
-  const [recentGames, setRecentGames] = useState([])
-  const [lastWeekGames, setLastWeekGames] = useState([])
-  const [lastMonthGames, setLastMonthGames] = useState([])
-  const [allGames, setAllGames] = useState([])
-  const [isAddGameModalOpen, setIsAddGameModalOpen] = useState(false)
-  const [isGameInfoModalOpen, setIsGameInfoModalOpen] = useState(false)
-  const [selectedGame, setSelectedGame] = useState(null)
-  const [isTimeOnlyMode, setIsTimeOnlyMode] = useState(false)
-  const [isLoadingGames, setIsLoadingGames] = useState(true)
-  const gamesScrollRef = useRef(null)
-  const mobileScrollRef = useRef(null)
-  const touchStartX = useRef(0)
-  const touchStartY = useRef(0)
-  const [currentGameIndex, setCurrentGameIndex] = useState(0)
-  const isScrolling = useRef(false)
-  const [showSteamSyncModal, setShowSteamSyncModal] = useState(false)
-  const [isCheckingSteam, setIsCheckingSteam] = useState(true)
-  const [steamConnected, setSteamConnected] = useState(false)
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, currentGame: '' })
-  const [syncLog, setSyncLog] = useState([]) // Array of { gameName, status: 'syncing' | 'synced' | 'skipped', displayedName: string }
-  const syncLogContainerRef = useRef(null)
+  // Effect to update allGames when sort or filter changes
+  useEffect(() => {
+    if (allGamesRaw.length > 0) {
+      const filteredAndSorted = applySortAndFilter(allGamesRaw, sortBy, platformFilter)
+      setAllGames(filteredAndSorted)
+      setCurrentGameIndex(0) // Reset to first game when filter/sort changes
+    }
+  }, [sortBy, platformFilter, allGamesRaw])
   
   // Auto-scroll log to bottom when new items are added
   useEffect(() => {
@@ -98,13 +198,6 @@ function Dashboard() {
       syncLogContainerRef.current.scrollTop = syncLogContainerRef.current.scrollHeight
     }
   }, [syncLog])
-  const [showLeftFade, setShowLeftFade] = useState(false)
-  const [showRightFade, setShowRightFade] = useState(true)
-  const [syncSuccessModal, setSyncSuccessModal] = useState({ show: false, addedCount: 0, skippedCount: 0 })
-  const [errorModal, setErrorModal] = useState({ show: false, message: '' })
-  const [addGameErrorModal, setAddGameErrorModal] = useState({ show: false, message: '' })
-  const [removeGameErrorModal, setRemoveGameErrorModal] = useState({ show: false, message: '' })
-  const [gameAlreadyInLibraryModal, setGameAlreadyInLibraryModal] = useState(false)
 
   // Get user ID
   const userId = user?.id
@@ -1116,9 +1209,44 @@ function Dashboard() {
 
               {/* All Games */}
               <div className="mb-8 md:mb-12">
-                <h2 className="text-xl md:text-2xl font-bold text-white mb-4">
-                  All Games
-                </h2>
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4 gap-3">
+                  <h2 className="text-xl md:text-2xl font-bold text-white">
+                    All Games
+                  </h2>
+                  
+                  {/* Sort and Filter Controls */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    {/* Sort By */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-gray-400 text-sm">Sort:</label>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="bg-gray-800/50 border border-gray-700 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-purple-500 transition-colors"
+                      >
+                        <option value="recent">Most Recent</option>
+                        <option value="played">Most Played</option>
+                      </select>
+                    </div>
+                    
+                    {/* Platform Filter - Only show if user has multiple platforms */}
+                    {availablePlatforms.length > 1 && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-gray-400 text-sm">Platform:</label>
+                        <select
+                          value={platformFilter}
+                          onChange={(e) => setPlatformFilter(e.target.value)}
+                          className="bg-gray-800/50 border border-gray-700 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-purple-500 transition-colors"
+                        >
+                          <option value="all">All Platforms</option>
+                          {availablePlatforms.map(platform => (
+                            <option key={platform} value={platform}>{platform}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 {allGames.length > 0 ? (
                   <div className="hidden md:flex gap-6 items-stretch">
                     <div className="flex-shrink-0">

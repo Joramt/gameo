@@ -90,18 +90,62 @@ function Integrations() {
   const [steamConnected, setSteamConnected] = useState(false)
   const [psnConnected, setPsnConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
-  const [isSyncing, setIsSyncing] = useState(false)
+  const [isSteamSyncing, setIsSteamSyncing] = useState(false)
+  const [isPsnSyncing, setIsPsnSyncing] = useState(false)
+  const syncAbortControllerRef = useRef(null) // AbortController for canceling sync operations
   const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, currentGame: '' })
   const [syncLog, setSyncLog] = useState([]) // Array of { gameName, status: 'syncing' | 'synced' | 'skipped', displayedName: string }
   const syncLogContainerRef = useRef(null)
+  const userHasScrolledRef = useRef(false)
+  const isProgrammaticScrollRef = useRef(false)
   const [currentSyncService, setCurrentSyncService] = useState(null) // 'steam' or 'psn'
   
-  // Auto-scroll log to bottom when new items are added
+  // Auto-scroll to the currently syncing game, but only if user hasn't manually scrolled
+  const isSyncing = isSteamSyncing || isPsnSyncing // Computed for backward compatibility
   useEffect(() => {
-    if (syncLogContainerRef.current) {
-      syncLogContainerRef.current.scrollTop = syncLogContainerRef.current.scrollHeight
+    if (syncLogContainerRef.current && !userHasScrolledRef.current && syncProgress.current > 0 && isSyncing) {
+      const container = syncLogContainerRef.current
+      // Find the currently syncing game (index is current - 1 since we're 1-indexed)
+      const currentIndex = syncProgress.current - 1
+      const logItems = container.querySelectorAll('[data-sync-log-index]')
+      
+      if (logItems[currentIndex]) {
+        isProgrammaticScrollRef.current = true
+        logItems[currentIndex].scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'nearest' 
+        })
+        // Clear the flag after scroll animation completes
+        setTimeout(() => {
+          isProgrammaticScrollRef.current = false
+        }, 500)
+      }
     }
-  }, [syncLog])
+  }, [syncProgress.current, isSyncing])
+  
+  // Reset user scroll tracking when sync starts
+  useEffect(() => {
+    if (isSyncing) {
+      userHasScrolledRef.current = false
+      isProgrammaticScrollRef.current = false
+    }
+  }, [isSyncing])
+  
+  // Detect manual scrolling
+  useEffect(() => {
+    const container = syncLogContainerRef.current
+    if (!container) return
+    
+    const handleScroll = () => {
+      // If this scroll event wasn't triggered by our programmatic scroll, user manually scrolled
+      if (!isProgrammaticScrollRef.current) {
+        userHasScrolledRef.current = true
+      }
+    }
+    
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [])
   const [connections, setConnections] = useState([])
   const [message, setMessage] = useState(null)
   const [showHowItWorks, setShowHowItWorks] = useState(true)
@@ -341,18 +385,37 @@ function Integrations() {
   const currentFace = cubeFaces[currentFaceIndex]
   const rotationDirection = `rotateX(${currentFace.x}deg) rotateY(${currentFace.y}deg)`
   
+  const handleAbortSync = () => {
+    if (syncAbortControllerRef.current) {
+      syncAbortControllerRef.current.abort()
+      syncAbortControllerRef.current = null
+    }
+    setIsSteamSyncing(false)
+    setIsPsnSyncing(false)
+    setIsFetchingLibrary(false)
+    setSyncProgress({ current: 0, total: 0, currentGame: '' })
+    setCurrentSyncService(null)
+    setSyncLog([])
+    console.log('[SYNC] Sync operation aborted by user')
+  }
+
   const handlePsnSync = async () => {
     setCurrentSyncService('psn')
-    setIsSyncing(true)
+    setIsPsnSyncing(true)
     setIsFetchingLibrary(true)
+    // Create AbortController for this sync
+    syncAbortControllerRef.current = new AbortController()
+    const abortSignal = syncAbortControllerRef.current.signal
+    
     try {
       const token = localStorage.getItem('auth_token')
-      console.log('Fetching PSN library - this may take a while for large libraries...')
+      console.log('[PSN SYNC] Fetching PSN library from backend using getUserPlayedGames...')
       const response = await fetch(`${API_URL}/api/integrations/psn/library`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
+        signal: abortSignal, // Add abort signal
       })
       
       setIsFetchingLibrary(false)
@@ -361,205 +424,275 @@ function Integrations() {
         const data = await response.json()
         const psnGames = data.games || []
         console.log(`[PSN SYNC] Received ${psnGames.length} games from API`)
+      
+      // Filter out streaming services (Netflix, YouTube, Crunchyroll, Disney+, IGN, Prime, Twitch, etc.)
+      const streamingServices = [
+        'netflix', 'youtube', 'crunchyroll', 'disney+', 'disney plus', 'hulu', 
+        'prime video', 'amazon prime', 'hbo', 'max', 'paramount+', 'paramount plus', 
+        'peacock', 'apple tv+', 'apple tv plus', 'ign', 'prime', 'twitch', 
+        'lecteur multimedia', 'live events viewer'
+      ]
+      
+      // PROCESS ALL GAMES - Filter out streaming services and null/undefined games
+      // Process EVERY SINGLE GAME from the API response - backend will handle duplicates (409 errors)
+      const gamesToProcess = psnGames.filter(game => {
+        if (!game || !game.name) return false // Filter out null/undefined games or games without names
         
-        // PROCESS ALL GAMES - NO FILTERING, NO PRE-CHECKS, NO DEDUPLICATION, NO EARLY RETURNS
-        // Process EVERY SINGLE GAME from the API response - backend will handle duplicates (409 errors)
-        const gamesToProcess = psnGames.filter(game => game && game.name) // Only filter out null/undefined games or games without names
-        const totalGames = gamesToProcess.length
-        console.log(`[PSN SYNC] ===== PROCESSING ALL ${totalGames} GAMES - NO FILTERING, NO LIMITS, NO EARLY RETURNS =====`)
-        console.log(`[PSN SYNC] Total games from API: ${psnGames.length}, Games to process: ${totalGames}`)
-        
-        // Set initial progress
-        setSyncProgress({ current: 0, total: totalGames, currentGame: '' })
-        const initialLogEntries = gamesToProcess.map((game) => ({
-          gameName: game.name || 'Unknown Game',
-          status: 'syncing',
-          displayedName: ''
-        }))
-        setSyncLog(initialLogEntries)
-        
-        // Start typewriter effects - gamesToProcess is already deduplicated, so no need for additional Set
-        initialLogEntries.forEach((logEntry) => {
-          // Capture values immediately to avoid closure issues
-          const logEntryGameName = logEntry?.gameName
-          let gameNameStr = 'Unknown Game'
-          if (logEntryGameName && typeof logEntryGameName !== 'function') {
-            gameNameStr = `${logEntryGameName}`
-          }
-          
-          // Typewriter effect in background (non-blocking)
-          (async () => {
-            // Re-capture inside async to ensure we have the right value
-            const targetGameName = `${gameNameStr}`
-            for (let j = 0; j <= targetGameName.length; j++) {
-              await new Promise(resolve => setTimeout(resolve, 60))
-              setSyncLog(prev => prev.map((item) => {
-                const itemGameName = item?.gameName
-                let itemGameNameStr = 'Unknown Game'
-                if (itemGameName && typeof itemGameName !== 'function') {
-                  itemGameNameStr = `${itemGameName}`
-                }
-                if (itemGameNameStr === targetGameName) {
-                  return { ...item, displayedName: targetGameName.substring(0, j) }
-                }
-                return item
-              }))
-            }
-          })()
-        })
-        
-        // Process ALL games in parallel - NO BATCHING, NO LIMITS, ALL GAMES, NO PRE-FILTERING
-        let addedCount = 0
-        let skippedCount = 0
-        
-        console.log(`[PSN SYNC] ===== STARTING TO PROCESS ALL ${gamesToProcess.length} GAMES =====`)
-        console.log(`[PSN SYNC] Processing ALL ${gamesToProcess.length} games in parallel - NO BATCHES, NO LIMITS`)
-        
-        // Process ALL games at once - EVERY SINGLE GAME WILL BE ATTEMPTED TO BE ADDED
-        const processPromises = gamesToProcess.map(async (game, index) => {
-          if (index % 50 === 0 || index < 5 || index >= gamesToProcess.length - 5) {
-            console.log(`[PSN SYNC] Processing game ${index + 1}/${gamesToProcess.length}: ${game.name || 'Unknown'}`)
-          }
-            const gameName = game.name || 'Unknown Game'
-            
-            // Format release date if available
-            let formattedReleaseDate = ''
-            if (game.releaseDate) {
-              try {
-                const releaseDate = new Date(game.releaseDate)
-                formattedReleaseDate = releaseDate.toLocaleDateString('en-US', {
-                  month: 'short',
-                  year: 'numeric'
-                })
-              } catch (e) {
-                // Invalid date, skip
-              }
-            }
-            
-            // Get game image - PSN API provides imageUrl
-            const imageUrl = game.imageUrl || ''
-            
-            // Get last played date
-            let lastPlayedDate = null
-            if (game.lastPlayedDate) {
-              try {
-                const lastPlayed = new Date(game.lastPlayedDate)
-                const now = new Date()
-                const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000)
-                if (!isNaN(lastPlayed.getTime()) && lastPlayed <= now && lastPlayed >= fiveYearsAgo) {
-                  lastPlayedDate = lastPlayed.toISOString()
-                }
-              } catch (e) {
-                // Invalid date, skip
-              }
-            }
-            
-            // Convert playtime if available (PSN API provides playDuration)
-            // playDuration is in seconds, convert to minutes
-            const timePlayedMinutes = game.playDuration ? Math.floor(game.playDuration / 60) : 0
-            
-            try {
-              const addResponse = await fetch(`${API_URL}/api/games`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  name: gameName,
-                  image: imageUrl,
-                  releaseDate: formattedReleaseDate,
-                  studio: game.publisher || 'Unknown Studio',
-                  timePlayed: timePlayedMinutes,
-                  lastPlayed: lastPlayedDate,
-                }),
-              })
-
-              if (addResponse.ok) {
-                addedCount++
-                if (index % 50 === 0 || index < 5 || index >= gamesToProcess.length - 5) {
-                  console.log(`[PSN SYNC] ✓ Added game ${index + 1}/${gamesToProcess.length}: ${gameName}`)
-                }
-                setSyncLog(prev => prev.map(item => 
-                  item.gameName === gameName && item.status === 'syncing'
-                    ? { ...item, status: 'synced' }
-                    : item
-                ))
-              } else if (addResponse.status === 409) {
-                // Game already exists in library - this is expected, skip it
-                skippedCount++
-                if (index % 50 === 0 || index < 5 || index >= gamesToProcess.length - 5) {
-                  console.log(`[PSN SYNC] ⊘ Skipped (already exists) game ${index + 1}/${gamesToProcess.length}: ${gameName}`)
-                }
-                setSyncLog(prev => prev.map(item => 
-                  item.gameName === gameName && item.status === 'syncing'
-                    ? { ...item, status: 'synced' }
-                    : item
-                ))
-              } else {
-                // Other error - still count as skipped but log it
-                skippedCount++
-                const errorText = await addResponse.text().catch(() => 'Unknown error')
-                console.error(`[PSN SYNC] ✗ Error adding game ${index + 1}/${gamesToProcess.length}: ${gameName} - Status: ${addResponse.status}, Error: ${errorText}`)
-                setSyncLog(prev => prev.map(item => 
-                  item.gameName === gameName && item.status === 'syncing'
-                    ? { ...item, status: 'synced' }
-                    : item
-                ))
-              }
-            } catch (error) {
-              console.error(`[PSN SYNC] Error adding game ${gameName}:`, error)
-              skippedCount++
-              setSyncLog(prev => prev.map(item => 
-                item.gameName === gameName && item.status === 'syncing'
-                  ? { ...item, status: 'synced' }
-                  : item
-              ))
-            }
-          return { gameName, success: true }
-        })
-        
-        console.log(`[PSN SYNC] ===== AWAITING ALL ${processPromises.length} PROMISES TO COMPLETE =====`)
-        const results = await Promise.all(processPromises)
-        console.log(`[PSN SYNC] ===== ALL ${results.length} GAMES PROCESSED =====`)
-        console.log(`[PSN SYNC] FINAL COUNT - Added: ${addedCount}, Skipped: ${skippedCount}, Total processed: ${results.length}`)
-        console.log(`[PSN SYNC] Expected total: ${gamesToProcess.length}, Actual processed: ${results.length}`)
-        
-        if (results.length !== gamesToProcess.length) {
-          console.error(`[PSN SYNC] ERROR: Processed ${results.length} games but expected ${gamesToProcess.length}`)
+        // Filter out streaming services (case-insensitive check)
+        const gameNameLower = game.name.toLowerCase()
+        return !streamingServices.some(service => gameNameLower.includes(service))
+      })
+      const totalGames = gamesToProcess.length
+      console.log(`[PSN SYNC] ===== PROCESSING ALL ${totalGames} GAMES - NO FILTERING, NO LIMITS, NO EARLY RETURNS =====`)
+      console.log(`[PSN SYNC] Total games from API: ${psnGames.length}, Games to process: ${totalGames}`)
+      
+      // Set initial progress
+      setSyncProgress({ current: 0, total: totalGames, currentGame: '' })
+      const initialLogEntries = gamesToProcess.map((game) => ({
+        gameName: game.name || 'Unknown Game',
+        status: 'syncing',
+        displayedName: ''
+      }))
+      setSyncLog(initialLogEntries)
+      
+      // Start typewriter effects
+      initialLogEntries.forEach((logEntry) => {
+        const logEntryGameName = logEntry?.gameName
+        let gameNameStr = 'Unknown Game'
+        if (logEntryGameName && typeof logEntryGameName !== 'function') {
+          gameNameStr = `${logEntryGameName}`
         }
         
-        // Mark all as synced
-        setSyncLog(prev => prev.map(item => 
-          item.status === 'syncing' ? { ...item, status: 'synced' } : item
-        ))
+        // Typewriter effect in background (non-blocking)
+        (async () => {
+          const targetGameName = `${gameNameStr}`
+          for (let j = 0; j <= targetGameName.length; j++) {
+            await new Promise(resolve => setTimeout(resolve, 60))
+            setSyncLog(prev => prev.map((item) => {
+              const itemGameName = item?.gameName
+              let itemGameNameStr = 'Unknown Game'
+              if (itemGameName && typeof itemGameName !== 'function') {
+                itemGameNameStr = `${itemGameName}`
+              }
+              if (itemGameNameStr === targetGameName) {
+                return { ...item, displayedName: targetGameName.substring(0, j) }
+              }
+              return item
+            }))
+          }
+        })()
+      })
+      
+      // Process ALL games ONE BY ONE (sequentially) - NO BATCHING, NO PARALLEL PROCESSING
+      let addedCount = 0
+      let skippedCount = 0
+      
+      console.log(`[PSN SYNC] ===== STARTING TO PROCESS ALL ${gamesToProcess.length} GAMES ONE BY ONE =====`)
+      console.log(`[PSN SYNC] Displaying all ${gamesToProcess.length} games to be processed:`)
+      gamesToProcess.forEach((game, idx) => {
+        console.log(`  Game ${idx + 1}/${gamesToProcess.length}: ${game.name || 'Unknown'}`)
+      })
+      
+      // Process ALL games ONE BY ONE (sequentially) - EVERY SINGLE GAME WILL BE ATTEMPTED TO BE ADDED
+      for (let index = 0; index < gamesToProcess.length; index++) {
+        // Check if sync was aborted
+        if (abortSignal.aborted) {
+          console.log('[PSN SYNC] Sync aborted by user')
+          break
+        }
         
-        setSyncProgress({ current: totalGames, total: totalGames, currentGame: 'Complete!' })
+        const game = gamesToProcess[index]
+        console.log(`[PSN SYNC] Processing game ${index + 1}/${gamesToProcess.length}: ${game.name || 'Unknown'}`)
+        const gameName = game.name || 'Unknown Game'
         
-        // Mark sync as complete
-        await fetch(`${API_URL}/api/integrations/psn/sync-complete`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ addedCount, skippedCount }),
-        })
+        // Format release date if available (getUserPlayedGames doesn't provide this, so it will be empty)
+        let formattedReleaseDate = ''
+        if (game.releaseDate) {
+          try {
+            const releaseDate = new Date(game.releaseDate)
+            if (!isNaN(releaseDate.getTime())) {
+              formattedReleaseDate = releaseDate.toLocaleDateString('en-US', {
+                month: 'short',
+                year: 'numeric'
+              })
+            }
+          } catch (e) {
+            // Invalid date, skip
+          }
+        }
         
-        await fetchConnections()
+        // Get game image - PSN API provides imageUrl
+        const imageUrl = game.imageUrl || ''
+        
+        // Get last played date
+        let lastPlayedDate = null
+        if (game.lastPlayedDate) {
+          try {
+            const lastPlayed = new Date(game.lastPlayedDate)
+            const now = new Date()
+            const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000)
+            if (!isNaN(lastPlayed.getTime()) && lastPlayed <= now && lastPlayed >= fiveYearsAgo) {
+              lastPlayedDate = lastPlayed.toISOString()
+            }
+          } catch (e) {
+            // Invalid date, skip
+          }
+        }
+        
+        // Get first played date (date started) - getUserPlayedGames provides firstPlayedDate
+        let dateStarted = null
+        if (game.firstPlayedDate) {
+          try {
+            const firstPlayed = new Date(game.firstPlayedDate)
+            if (!isNaN(firstPlayed.getTime())) {
+              dateStarted = firstPlayed.toISOString().split('T')[0] // YYYY-MM-DD format
+            }
+          } catch (e) {
+            // Invalid date, skip
+          }
+        }
+        
+        // playDuration is already in minutes from backend (parsed from ISO 8601 format)
+        const timePlayedMinutes = game.playDuration || 0
+        
+        // Platform might be a comma-separated string like "PS4, PS5" from merged games
+        const psnPlatform = game.platform || null
+        
+        // Check if we need to enrich (missing studio or releaseDate)
+        const needsEnrichment = (!game.publisher || game.publisher === 'Unknown Publisher' || !formattedReleaseDate)
+        
+        try {
+          // Check if aborted before making request
+          if (abortSignal.aborted) {
+            console.log('[PSN SYNC] Sync aborted, stopping game processing')
+            break
+          }
+          
+          const addResponse = await fetch(`${API_URL}/api/games`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            signal: abortSignal, // Add abort signal to fetch
+            body: JSON.stringify({
+              name: gameName,
+              image: imageUrl,
+              releaseDate: formattedReleaseDate,
+              studio: game.publisher || 'Unknown Studio',
+              psnId: game.id || null, // Store PSN ID (titleId or concept.id)
+              psnPlatform: psnPlatform, // Store platform (PS4/PS5/PS3 or comma-separated)
+              timePlayed: timePlayedMinutes,
+              lastPlayed: lastPlayedDate,
+              dateStarted: dateStarted, // Use firstPlayedDate from getUserPlayedGames
+              enrich: needsEnrichment, // Only enrich if missing studio or releaseDate
+            }),
+          })
+
+          if (addResponse.ok) {
+            addedCount++
+            console.log(`[PSN SYNC] ✓ Added game ${index + 1}/${gamesToProcess.length}: ${gameName}`)
+            setSyncLog(prev => prev.map(item => 
+              item.gameName === gameName && item.status === 'syncing'
+                ? { ...item, status: 'synced' }
+                : item
+            ))
+          } else if (addResponse.status === 409) {
+            // Game already exists in library - this is expected, skip it
+            skippedCount++
+            console.log(`[PSN SYNC] ⊘ Skipped (already exists) game ${index + 1}/${gamesToProcess.length}: ${gameName}`)
+            setSyncLog(prev => prev.map(item => 
+              item.gameName === gameName && item.status === 'syncing'
+                ? { ...item, status: 'skipped' }
+                : item
+            ))
+          } else {
+            // Other error - still count as skipped but log it
+            skippedCount++
+            const errorText = await addResponse.text().catch(() => 'Unknown error')
+            console.error(`[PSN SYNC] ✗ Error adding game ${index + 1}/${gamesToProcess.length}: ${gameName} - Status: ${addResponse.status}, Error: ${errorText}`)
+            setSyncLog(prev => prev.map(item => 
+              item.gameName === gameName && item.status === 'syncing'
+                ? { ...item, status: 'skipped' }
+                : item
+            ))
+          }
+          
+          // Update progress
+          setSyncProgress({ 
+            current: index + 1, 
+            total: gamesToProcess.length, 
+            currentGame: gameName 
+          })
+        } catch (error) {
+          console.error(`[PSN SYNC] Error adding game ${gameName}:`, error)
+          skippedCount++
+          setSyncLog(prev => prev.map(item => 
+            item.gameName === gameName && item.status === 'syncing'
+              ? { ...item, status: 'skipped' }
+              : item
+          ))
+          setSyncProgress({ 
+            current: index + 1, 
+            total: gamesToProcess.length, 
+            currentGame: gameName 
+          })
+        }
+      }
+      
+      console.log(`[PSN SYNC] ===== ALL ${gamesToProcess.length} GAMES PROCESSED =====`)
+      console.log(`[PSN SYNC] FINAL COUNT - Added: ${addedCount}, Skipped: ${skippedCount}, Total processed: ${gamesToProcess.length}`)
+      
+      // Mark all as synced
+      setSyncLog(prev => prev.map(item => 
+        item.status === 'syncing' ? { ...item, status: 'synced' } : item
+      ))
+      
+      setSyncProgress({ current: totalGames, total: totalGames, currentGame: 'Complete!' })
+      
+      // Mark sync as complete
+      await fetch(`${API_URL}/api/integrations/psn/sync-complete`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ addedCount, skippedCount }),
+      })
+      
+      await fetchConnections()
+      setSyncSuccessModal({
+        show: true,
+        addedCount,
+        skippedCount,
+        message: `Successfully synced ${addedCount} new games from your PSN library.`
+      })
       } else {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
         setErrorModal({ show: true, message: `Failed to sync PSN library: ${errorData.error || 'Unknown error'}`, onConfirm: null })
       }
     } catch (error) {
-      console.error('Error syncing PSN library:', error)
+      if (error.name === 'AbortError' || abortSignal.aborted) {
+        console.log('[PSN SYNC] Sync was aborted')
+        // Don't show error modal for aborted syncs
+      } else {
+        console.error('[PSN SYNC] Error syncing PSN library:', error)
         setErrorModal({ show: true, message: 'An error occurred while syncing your PSN library. Please try again.', onConfirm: null })
+      }
+    } finally {
+      setIsPsnSyncing(false)
+      setIsFetchingLibrary(false)
+      syncAbortControllerRef.current = null
     }
   }
 
   const handleSteamSync = async () => {
     setCurrentSyncService('steam')
-    setIsSyncing(true)
+    setIsSteamSyncing(true)
+    // Create AbortController for this sync
+    syncAbortControllerRef.current = new AbortController()
+    const abortSignal = syncAbortControllerRef.current.signal
+    
     try {
       const token = localStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/integrations/steam/library`, {
@@ -593,7 +726,7 @@ function Integrations() {
         
         // If no games to process, show success modal
         if (totalGames === 0) {
-          setIsSyncing(false)
+          setIsSteamSyncing(false)
           setTimeout(() => {
             setSyncSuccessModal({ 
               show: true, 
@@ -606,7 +739,7 @@ function Integrations() {
         }
         
         // Set initial progress
-        setIsSyncing(true)
+        setIsSteamSyncing(true)
         setSyncProgress({ current: 0, total: totalGames, currentGame: '' })
         setSyncLog([]) // Clear previous log
         
@@ -698,10 +831,20 @@ function Integrations() {
         // Process games in parallel batches for speed
         const batchSize = 10
         for (let i = 0; i < gamesToProcess.length; i += batchSize) {
+          // Check if sync was aborted
+          if (abortSignal.aborted) {
+            console.log('[STEAM SYNC] Sync aborted by user')
+            break
+          }
+          
           const batch = gamesToProcess.slice(i, i + batchSize)
           
           // Process batch in parallel
           await Promise.all(batch.map(async (steamGame) => {
+            // Check if aborted
+            if (abortSignal.aborted) {
+              return
+            }
             const gameName = String(steamGame?.name || 'Unknown Game') // Ensure it's always a string
             
             // Fetch detailed game information
@@ -710,11 +853,17 @@ function Integrations() {
             let gamePrice = null // Will store price if available
             
             try {
+              // Check if aborted before making request
+              if (abortSignal.aborted) {
+                return
+              }
+              
               const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${steamGame.appid}`, {
                 headers: {
                   'Authorization': `Bearer ${token}`,
                   'Content-Type': 'application/json',
                 },
+                signal: abortSignal, // Add abort signal
               })
               
               if (detailsResponse.ok) {
@@ -796,12 +945,18 @@ function Integrations() {
             
             // Add to database
             try {
+              // Check if aborted before making request
+              if (abortSignal.aborted) {
+                return
+              }
+              
               const addResponse = await fetch(`${API_URL}/api/games`, {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${token}`,
                   'Content-Type': 'application/json',
                 },
+                signal: abortSignal, // Add abort signal
                 body: JSON.stringify({
                   name: steamGame.name || 'Unknown Game',
                   image: imageUrl,
@@ -883,8 +1038,15 @@ function Integrations() {
         setIsSteamSynchronized(true)
         // Store sync counts in state for showing in modal when clicking "Synchronized" button
         setSyncCounts({ addedCount, skippedCount })
-        // Don't show separate success modal - keep the sync modal open with console log visible
         setSteamHasSynced(true)
+        
+        // Show success modal (same as PSN sync)
+        setSyncSuccessModal({
+          show: true,
+          addedCount,
+          skippedCount,
+          message: `Successfully synced ${addedCount} new games from your Steam library.`
+        })
       } else {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
         setErrorModal({ show: true, message: `Failed to sync Steam library: ${errorData.error || 'Unknown error'}`, onConfirm: null })
@@ -1083,14 +1245,20 @@ function Integrations() {
                         {(service.id === 'steam' || service.id === 'psn') && !isSteamSynchronized && (
                           <button
                             onClick={service.id === 'steam' ? handleSteamSync : handlePsnSync}
-                            disabled={isSyncing || !service.connected || isLoadingConnections}
+                            disabled={
+                              (service.id === 'steam' ? isSteamSyncing : isPsnSyncing) || 
+                              !service.connected || 
+                              isLoadingConnections
+                            }
                             className={`px-4 py-2 text-white rounded-lg transition-all transform text-sm font-medium flex items-center justify-center space-x-2 shadow-lg ${
-                              !service.connected || isSyncing || isLoadingConnections
+                              !service.connected || 
+                              (service.id === 'steam' ? isSteamSyncing : isPsnSyncing) || 
+                              isLoadingConnections
                                 ? 'bg-gray-700/80 opacity-50 cursor-not-allowed'
                                 : `bg-gradient-to-r ${service.color} hover:scale-105`
                             }`}
                           >
-                            {isSyncing ? (
+                            {(service.id === 'steam' ? isSteamSyncing : isPsnSyncing) ? (
                               <>
                                 <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -1150,17 +1318,27 @@ function Integrations() {
       <Modal
         isOpen={isSyncing}
         onClose={() => {
-          setIsSyncing(false)
-          setIsFetchingLibrary(false)
-          setSyncProgress({ current: 0, total: 0, currentGame: '' })
-          setCurrentSyncService(null)
+          handleAbortSync()
         }}
         title={isFetchingLibrary 
           ? `Fetching Your ${currentSyncService === 'steam' ? 'Steam' : 'PSN'} Library` 
           : (syncProgress.current === syncProgress.total && syncProgress.total > 0 
             ? "Sync Complete" 
             : `Syncing Your ${currentSyncService === 'steam' ? 'Steam' : 'PSN'} Library`)}
-        preventClose={syncProgress.current !== syncProgress.total || syncProgress.total === 0 || isFetchingLibrary}
+        preventClose={false}
+        footer={
+          <div className="flex justify-end gap-3 pt-4">
+            <button
+              onClick={handleAbortSync}
+              className="px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded-lg transition-all text-sm font-medium flex items-center justify-center space-x-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              <span>Abort Sync</span>
+            </button>
+          </div>
+        }
         additionalContent={
           <div className="relative w-full md:w-full md:max-w-md md:h-auto md:mx-4 md:max-h-[90vh] md:min-h-[400px]" style={{ border: '1px solid #e5e7eb' }}>
             <GamingFacts facts={gamingFacts} rotationDirection={rotationDirection} />
@@ -1240,7 +1418,11 @@ function Integrations() {
                         : 'SYNCING...'
                     
                     return (
-                      <div key={index} className="text-gray-300 whitespace-nowrap flex items-center">
+                      <div 
+                        key={index} 
+                        data-sync-log-index={index}
+                        className="text-gray-300 whitespace-nowrap flex items-center"
+                      >
                         <span className="text-purple-300">{gameNameDisplay}</span>
                         <span className="text-gray-600 flex-1">{dots}</span>
                         <span className={statusColor}>{statusText}</span>

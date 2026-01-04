@@ -166,10 +166,13 @@ function GameCard({ game, onTimerClick, onCardClick, onRemove }) {
     }
   }
 
-  // Format price
+  // Format price - differentiate between free ($0) and unknown (null/undefined/empty string)
   const formatPrice = (price) => {
-    if (!price || price === 0) return 'Not set'
-    return `$${parseFloat(price).toFixed(2)}`
+    if (price === null || price === undefined || price === '') return 'Not set'
+    if (price === 0) return 'Free'
+    const numPrice = parseFloat(price)
+    if (isNaN(numPrice)) return 'Not set'
+    return `$${numPrice.toFixed(2)}`
   }
 
   return (
@@ -233,11 +236,44 @@ function GameCard({ game, onTimerClick, onCardClick, onRemove }) {
               )}
               
               {/* Release Date - Below Studio Name */}
-              {game.releaseDate && (
+              {game.releaseDate && game.releaseDate !== 'Invalid Date' && (
                 <div className="inline-flex items-center pr-2 md:pr-1.5 py-1 md:py-1 backdrop-blur-sm rounded-md text-white text-xs md:text-[10px] font-medium whitespace-nowrap w-fit" style={{
                   textShadow: '0 2px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(0, 0, 0, 0.5)'
                 }}>
                   <span>Released {game.releaseDate}</span>
+                </div>
+              )}
+              
+              {/* Service Icons - Below Release Date */}
+              {(game.steamAppId || game.psnId || game.psnPlatform) && (
+                <div className="flex items-center justify-start gap-1.5 md:gap-1.5 px-0 py-0 flex-wrap">
+                  {game.steamAppId && (
+                    <div className="text-white text-[10px] md:text-[9px] font-bold px-1 py-0.5 rounded bg-[#1b2838] border border-[#66c0f4]/30" style={{
+                      textShadow: '0 1px 2px rgba(0, 0, 0, 0.8)',
+                      filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))'
+                    }}>
+                      STEAM
+                    </div>
+                  )}
+                  {/* Parse comma-separated platforms and display separate badges */}
+                  {game.psnPlatform && game.psnPlatform.split(',').map((platform, index) => {
+                    const trimmedPlatform = platform.trim()
+                    // Skip empty or "PSN" platforms - only show specific platforms (PS4, PS5, PS3, etc.)
+                    if (!trimmedPlatform || trimmedPlatform.toUpperCase() === 'PSN') return null
+                    return (
+                      <div 
+                        key={`${trimmedPlatform}-${index}`}
+                        className="text-white text-[10px] md:text-[9px] font-bold px-1 py-0.5 rounded bg-[#003087] border border-[#0070f3]/30" 
+                        style={{
+                          textShadow: '0 1px 2px rgba(0, 0, 0, 0.8)',
+                          filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))'
+                        }}
+                      >
+                        {trimmedPlatform}
+                      </div>
+                    )
+                  })}
+                  {/* No fallback to PSN - if no specific platform, don't show a badge */}
                 </div>
               )}
             </div>

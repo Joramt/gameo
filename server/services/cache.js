@@ -16,6 +16,9 @@ const cacheConfig = {
 // Create cache instance
 export const steamCache = new NodeCache(cacheConfig)
 
+// Create separate cache for PSN SearchGame API (same config)
+export const psnSearchCache = new NodeCache(cacheConfig)
+
 // Log cache events (optional, for debugging)
 if (process.env.NODE_ENV === 'development') {
   steamCache.on('set', (key, value) => {

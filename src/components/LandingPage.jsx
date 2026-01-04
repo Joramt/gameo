@@ -125,6 +125,7 @@ function LandingPage() {
         isOpen={showSignupModal}
         onClose={handleCloseSignup}
         title="Create Account"
+        opaqueHeader={true}
       >
         <SignupForm
           onSwitchToLogin={() => {
