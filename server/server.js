@@ -12,6 +12,7 @@ import { budgetRouter } from './routes/budget.js'
 import { integrationsRouter } from './routes/integrations.js'
 import { gamesRouter } from './routes/games.js'
 import { gamesEnrichmentRouter } from './routes/gamesEnrichment.js'
+import { imagesRouter } from './routes/images.js'
 
 // Verify routes are loaded
 console.log('✅ Routes loaded:', {
@@ -123,6 +124,9 @@ try {
   app.use('/api/games', gamesRouter)
   app.use('/api/games', gamesEnrichmentRouter)
   console.log('✅ Registered /api/games routes')
+  
+  app.use('/api/images', imagesRouter)
+  console.log('✅ Registered /api/images routes')
   
   // Test route registration
   app.get('/api/test', (req, res) => {

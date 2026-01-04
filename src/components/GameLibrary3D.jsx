@@ -658,10 +658,19 @@ function GameLibrary3D({ games = [] }) {
         const boxMesh = new THREE.Mesh(boxGeometry, materials)
         
         // Load game cover image if available and apply to front face (index 4)
-        if (game.image) {
+        // Use the exact same image field as GameCard component (game.image)
+        // For PSN images (which don't support CORS), proxy through backend to enable Three.js texture loading
+        const imageUrl = game.image
+        if (imageUrl) {
+          // Check if this is a PSN image (playstation.com domain) that needs proxying
+          const needsProxy = imageUrl.includes('image.api.playstation.com') || imageUrl.includes('playstation.com')
+          const finalImageUrl = needsProxy 
+            ? `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/images/proxy?url=${encodeURIComponent(imageUrl)}`
+            : imageUrl
+          
           const textureLoader = new THREE.TextureLoader()
           textureLoader.load(
-            game.image,
+            finalImageUrl,
             (texture) => {
               // Optimize texture settings for high quality with efficient memory usage
               texture.colorSpace = THREE.SRGBColorSpace
@@ -688,7 +697,7 @@ function GameLibrary3D({ games = [] }) {
             },
             undefined,
             (error) => {
-              console.warn('Failed to load game cover:', game.name, error)
+              console.warn('Failed to load game cover for 3D library:', game.name, 'URL:', finalImageUrl, error)
             }
           )
         }
@@ -1498,10 +1507,19 @@ function GameDetailModal({ game, onClose }) {
     openProgressRef.current = 0
 
         // Load game cover image if available and apply to front cover
-        if (game.image) {
+        // Use the exact same image field as GameCard component (game.image)
+        // For PSN images (which don't support CORS), proxy through backend to enable Three.js texture loading
+        const imageUrl = game.image
+        if (imageUrl) {
+          // Check if this is a PSN image (playstation.com domain) that needs proxying
+          const needsProxy = imageUrl.includes('image.api.playstation.com') || imageUrl.includes('playstation.com')
+          const finalImageUrl = needsProxy 
+            ? `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/images/proxy?url=${encodeURIComponent(imageUrl)}`
+            : imageUrl
+          
           const textureLoader = new THREE.TextureLoader()
           textureLoader.load(
-            game.image,
+            finalImageUrl,
             (texture) => {
               texture.colorSpace = THREE.SRGBColorSpace
               const maxAnisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 16)
@@ -1523,7 +1541,7 @@ function GameDetailModal({ game, onClose }) {
             },
             undefined,
             (error) => {
-              console.warn('Failed to load game cover:', game.name, error)
+              console.warn('Failed to load game cover for 3D modal:', game.name, 'URL:', finalImageUrl, error)
             }
           )
         }
