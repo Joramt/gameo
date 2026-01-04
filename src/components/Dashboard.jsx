@@ -33,10 +33,6 @@ function Dashboard() {
   const [isLoadingGames, setIsLoadingGames] = useState(true)
   const gamesScrollRef = useRef(null)
   const mobileScrollRef = useRef(null)
-  const touchStartX = useRef(0)
-  const touchStartY = useRef(0)
-  const [currentGameIndex, setCurrentGameIndex] = useState(0)
-  const isScrolling = useRef(false)
   const [showSteamSyncModal, setShowSteamSyncModal] = useState(false)
   const [isCheckingSteam, setIsCheckingSteam] = useState(true)
   const [steamConnected, setSteamConnected] = useState(false)
@@ -188,7 +184,6 @@ function Dashboard() {
     if (allGamesRaw.length > 0) {
       const filteredAndSorted = applySortAndFilter(allGamesRaw, sortBy, platformFilter)
       setAllGames(filteredAndSorted)
-      setCurrentGameIndex(0) // Reset to first game when filter/sort changes
     }
   }, [sortBy, platformFilter, allGamesRaw])
   
@@ -295,7 +290,6 @@ function Dashboard() {
           const data = await response.json()
           const games = data.games || []
           categorizeGames(games)
-          setCurrentGameIndex(0)
         } else {
           console.error('Failed to load games')
           categorizeGames([])
@@ -605,10 +599,7 @@ function Dashboard() {
           const updatedGames = [...newGames, ...allGames]
           categorizeGames(updatedGames)
           
-          // Reset mobile index to show new games
-          setCurrentGameIndex(0)
-          
-          // Scroll to beginning to show the newly added games
+      // Scroll to beginning to show the newly added games
           setTimeout(() => {
             if (gamesScrollRef.current) {
               gamesScrollRef.current.scrollTo({ left: 0, behavior: 'smooth' })
@@ -912,9 +903,6 @@ function Dashboard() {
     setIsTimeOnlyMode(false)
     setIsGameInfoModalOpen(true)
 
-    // Reset mobile scroll index to show the new game
-    setCurrentGameIndex(0)
-
     // Scroll to beginning to show the newly added game
     setTimeout(() => {
       if (gamesScrollRef.current) {
@@ -1147,7 +1135,7 @@ function Dashboard() {
                   Played This Week
                 </h2>
                 {lastWeekGames.length > 0 ? (
-                  <div className="hidden md:flex gap-6 items-stretch">
+                  <div className="md:flex gap-6 items-stretch">
                     <div className="relative flex-1 min-w-0">
                       <div 
                         className="flex gap-6 overflow-x-auto pb-4" 
@@ -1180,7 +1168,7 @@ function Dashboard() {
                   Played This Month
                 </h2>
                 {lastMonthGames.length > 0 ? (
-                  <div className="hidden md:flex gap-6 items-stretch">
+                  <div className="md:flex gap-6 items-stretch">
                     <div className="relative flex-1 min-w-0">
                       <div 
                         className="flex gap-6 overflow-x-auto pb-4" 
@@ -1248,8 +1236,8 @@ function Dashboard() {
                   </div>
                 </div>
                 {allGames.length > 0 ? (
-                  <div className="hidden md:flex gap-6 items-stretch">
-                    <div className="flex-shrink-0">
+                  <div className="md:flex gap-6 items-stretch">
+                    <div className="flex-shrink-0 hidden md:block">
                       <AddGameCard onClick={handleAddGame} />
                     </div>
                     <div className="relative flex-1 min-w-0">
@@ -1276,78 +1264,6 @@ function Dashboard() {
                     <p className="text-gray-400 text-sm">No games in your library yet 🎮</p>
                   </div>
                 )}
-              </div>
-
-              {/* Mobile: Full Screen Game Cards with Swipe */}
-              <div 
-                ref={mobileScrollRef}
-                className="md:hidden relative overflow-hidden pb-4 hide-scrollbar"
-                style={{ 
-                  height: 'calc(100vh - 240px)',
-                  touchAction: 'pan-y pinch-zoom'
-                }}
-                onTouchStart={(e) => {
-                  if (isScrolling.current) return
-                  touchStartX.current = e.touches[0].clientX
-                  touchStartY.current = e.touches[0].clientY
-                }}
-                onTouchMove={(e) => {
-                  if (isScrolling.current) return
-                  const touchX = e.touches[0].clientX
-                  const touchY = e.touches[0].clientY
-                  const deltaX = touchX - touchStartX.current
-                  const deltaY = touchY - touchStartY.current
-                  
-                  if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
-                    e.preventDefault()
-                  }
-                }}
-                onTouchEnd={(e) => {
-                  if (isScrolling.current) return
-                  const touchEndX = e.changedTouches[0].clientX
-                  const touchEndY = e.changedTouches[0].clientY
-                  const deltaX = touchEndX - touchStartX.current
-                  const deltaY = touchEndY - touchStartY.current
-                  
-                  if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
-                    isScrolling.current = true
-                    
-                    setCurrentGameIndex((prevIndex) => {
-                      let newIndex = prevIndex
-                      if (deltaX < 0 && prevIndex < allGames.length - 1) {
-                        newIndex = prevIndex + 1
-                      } else if (deltaX > 0 && prevIndex > 0) {
-                        newIndex = prevIndex - 1
-                      }
-                      return newIndex
-                    })
-                    
-                    setTimeout(() => {
-                      isScrolling.current = false
-                    }, 300)
-                  }
-                }}
-              >
-                <div 
-                  className="flex h-full transition-transform duration-300 ease-out"
-                  style={{
-                    transform: `translateX(${-currentGameIndex * 100}%)`,
-                    width: `100%`
-                  }}
-                >
-                  {allGames.map((game) => (
-                    <div 
-                      key={game.id} 
-                      className="flex-shrink-0 w-full h-full flex justify-center self-center"
-                    >
-                      <GameCard 
-                        game={game}
-                        onTimerClick={handleTimerClick}
-                        onRemove={handleRemoveGame}
-                      />
-                    </div>
-                  ))}
-                </div>
               </div>
             </>
           )}
