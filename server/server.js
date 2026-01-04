@@ -13,6 +13,10 @@ import { integrationsRouter } from './routes/integrations.js'
 import { gamesRouter } from './routes/games.js'
 import { gamesEnrichmentRouter } from './routes/gamesEnrichment.js'
 import { imagesRouter } from './routes/images.js'
+import { postsRouter } from './routes/posts.js'
+import { commentsRouter } from './routes/comments.js'
+import { postLikesRouter } from './routes/postLikes.js'
+import { commentLikesRouter } from './routes/commentLikes.js'
 
 // Verify routes are loaded
 console.log('✅ Routes loaded:', {
@@ -127,6 +131,12 @@ try {
   
   app.use('/api/images', imagesRouter)
   console.log('✅ Registered /api/images routes')
+  
+  app.use('/api/posts', postsRouter)
+  app.use('/api/posts', commentsRouter) // Comments routes are nested under posts
+  app.use('/api/posts', postLikesRouter) // Post likes routes are nested under posts
+  app.use('/api/comments', commentLikesRouter) // Comment likes routes are nested under comments
+  console.log('✅ Registered /api/posts routes')
   
   // Test route registration
   app.get('/api/test', (req, res) => {

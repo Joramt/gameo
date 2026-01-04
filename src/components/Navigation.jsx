@@ -9,6 +9,7 @@ function Navigation() {
   const [showUserMenu, setShowUserMenu] = useState(false)
 
   const isDashboard = location.pathname === '/dashboard'
+  const isSocial = location.pathname === '/social'
   const isIntegrations = location.pathname === '/integrations'
 
   // Capitalize first letter of each word in a name
@@ -45,6 +46,23 @@ function Navigation() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                 </svg>
                 <span className="hidden md:inline">Integrations</span>
+              </button>
+            )}
+            
+            {/* Create Post Button - only show on Social */}
+            {isSocial && (
+              <button
+                onClick={() => {
+                  // Dispatch custom event that SocialFeed listens to
+                  window.dispatchEvent(new CustomEvent('openCreatePost'))
+                }}
+                className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white rounded-lg transition-all font-medium"
+                aria-label="Create Post"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                <span className="hidden md:inline">Create Post</span>
               </button>
             )}
             

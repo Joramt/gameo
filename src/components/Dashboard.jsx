@@ -8,6 +8,8 @@ import GameInfoModal from './GameInfoModal'
 import GameLibrary3D from './GameLibrary3D'
 import Modal from './Modal'
 import Navigation from './Navigation'
+import Tabs from './Tabs'
+import SocialFeed from './SocialFeed'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -47,6 +49,7 @@ function Dashboard() {
   const [addGameErrorModal, setAddGameErrorModal] = useState({ show: false, message: '' })
   const [removeGameErrorModal, setRemoveGameErrorModal] = useState({ show: false, message: '' })
   const [gameAlreadyInLibraryModal, setGameAlreadyInLibraryModal] = useState(false)
+  const [activeTab, setActiveTab] = useState('library') // 'library' or 'social'
 
   // Capitalize first letter of each word in a name
   const capitalizeName = (name) => {
@@ -1045,23 +1048,40 @@ function Dashboard() {
       {/* Navigation */}
       <Navigation />
 
+      {/* Tabs */}
+      <Tabs
+        activeTab={activeTab}
+        onTabChange={(tabId) => {
+          if (tabId === 'social') {
+            navigate('/social')
+          } else {
+            setActiveTab(tabId)
+          }
+        }}
+        tabs={[
+          { id: 'library', label: 'Library' },
+          { id: 'social', label: 'Social' }
+        ]}
+      />
 
       {/* Dashboard Content */}
       <div className="container mx-auto px-6 py-6 md:py-12">
         <div className="max-w-7xl mx-auto">
-          <div className="mb-4 md:mb-8">
-            <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
-              Welcome back, {user?.name ? capitalizeName(user.name.split(' ')[0]) : 'Gamer'}! 🎮
-            </h1>
-            <p className="text-gray-400 text-sm md:text-base" id="games-description">
-              Games{' '}
-              <span className="text-gray-500 text-xs md:text-sm">
-                ({recentGames.length})
-              </span>
-            </p>
-          </div>
+          {activeTab === 'library' ? (
+            <>
+              <div className="mb-4 md:mb-8">
+                <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
+                  Welcome back, {user?.name ? capitalizeName(user.name.split(' ')[0]) : 'Gamer'}! 🎮
+                </h1>
+                <p className="text-gray-400 text-sm md:text-base" id="games-description">
+                  Games{' '}
+                  <span className="text-gray-500 text-xs md:text-sm">
+                    ({recentGames.length})
+                  </span>
+                </p>
+              </div>
 
-          {/* Game Lists - Last Week, Last Month, All Games */}
+              {/* Game Lists - Last Week, Last Month, All Games */}
           {isLoadingGames ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
@@ -1280,6 +1300,10 @@ function Dashboard() {
               <GameLibrary3D games={allGames} />
             </div>
           )}
+            </>
+          ) : (
+            <SocialFeed />
+          )}
         </div>
       </div>
 
@@ -1326,8 +1350,9 @@ function Dashboard() {
         title="Syncing Your Steam Library"
         preventClose={true}
       >
-        <div className="space-y-6">
-          <div>
+        <div className="flex flex-col space-y-6">
+          {/* Progress Info Section */}
+          <div className="flex flex-col">
             <p className="text-gray-300 mb-4">
               {syncProgress.total > 0 
                 ? `Importing game ${syncProgress.current} of ${syncProgress.total}`
@@ -1349,55 +1374,55 @@ function Dashboard() {
                 ? `${Math.round((syncProgress.current / syncProgress.total) * 100)}% complete`
                 : 'Initializing...'}
             </p>
-            
-            {/* Console-like log */}
-            {syncLog.length > 0 && (
-              <div className="w-full bg-gray-900/80 border border-gray-700 rounded-lg p-4">
-                <div className="text-xs text-gray-400 mb-2 font-mono">Sync Log:</div>
-                <div 
-                  ref={syncLogContainerRef}
-                  className="h-48 overflow-y-auto font-mono text-xs space-y-1 hide-scrollbar"
-                  style={{ scrollBehavior: 'smooth' }}
-                >
-                  {syncLog.map((logItem, index) => {
-                    // Use displayedName for typewriter effect, fallback to gameName
-                    const displayedGameName = logItem.displayedName !== undefined 
-                      ? logItem.displayedName 
-                      : logItem.gameName
-                    
-                    // Calculate dots to fill space - aim for ~50 chars total
-                    const maxGameNameLength = 30
-                    const gameNameDisplay = displayedGameName.length > maxGameNameLength 
-                      ? displayedGameName.substring(0, maxGameNameLength - 3) + '...'
-                      : displayedGameName
-                    const availableWidth = 45
-                    const dotsCount = Math.max(2, availableWidth - gameNameDisplay.length - (logItem.status === 'synced' ? 6 : 9))
-                    const dots = '.'.repeat(dotsCount)
-                    
-                    const statusColor = logItem.status === 'synced' 
-                      ? 'text-green-400' 
-                      : 'text-gray-400'
-                    const statusText = logItem.status === 'synced' 
-                      ? 'SYNCED' 
-                      : 'SYNCING...'
-                    
-                    return (
-                      <div key={index} className="text-gray-300 whitespace-nowrap flex items-center">
-                        <span className="text-purple-300">
-                          {gameNameDisplay}
-                          {logItem.displayedName !== undefined && logItem.displayedName.length < logItem.gameName.length && (
-                            <span className="animate-pulse">|</span>
-                          )}
-                        </span>
-                        <span className="text-gray-600 flex-1">{dots}</span>
-                        <span className={statusColor}>{statusText}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
           </div>
+          
+          {/* Console-like log - Separate section to ensure proper stacking on mobile */}
+          {syncLog.length > 0 && (
+            <div className="w-full bg-gray-900/80 border border-gray-700 rounded-lg p-4 flex-shrink-0">
+              <div className="text-xs text-gray-400 mb-2 font-mono">Sync Log:</div>
+              <div 
+                ref={syncLogContainerRef}
+                className="h-48 overflow-y-auto font-mono text-xs space-y-1 hide-scrollbar"
+                style={{ scrollBehavior: 'smooth' }}
+              >
+                {syncLog.map((logItem, index) => {
+                  // Use displayedName for typewriter effect, fallback to gameName
+                  const displayedGameName = logItem.displayedName !== undefined 
+                    ? logItem.displayedName 
+                    : logItem.gameName
+                  
+                  // Calculate dots to fill space - aim for ~50 chars total
+                  const maxGameNameLength = 30
+                  const gameNameDisplay = displayedGameName.length > maxGameNameLength 
+                    ? displayedGameName.substring(0, maxGameNameLength - 3) + '...'
+                    : displayedGameName
+                  const availableWidth = 45
+                  const dotsCount = Math.max(2, availableWidth - gameNameDisplay.length - (logItem.status === 'synced' ? 6 : 9))
+                  const dots = '.'.repeat(dotsCount)
+                  
+                  const statusColor = logItem.status === 'synced' 
+                    ? 'text-green-400' 
+                    : 'text-gray-400'
+                  const statusText = logItem.status === 'synced' 
+                    ? 'SYNCED' 
+                    : 'SYNCING...'
+                  
+                  return (
+                    <div key={index} className="text-gray-300 whitespace-nowrap flex items-center">
+                      <span className="text-purple-300">
+                        {gameNameDisplay}
+                        {logItem.displayedName !== undefined && logItem.displayedName.length < logItem.gameName.length && (
+                          <span className="animate-pulse">|</span>
+                        )}
+                      </span>
+                      <span className="text-gray-600 flex-1">{dots}</span>
+                      <span className={statusColor}>{statusText}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </Modal>
 

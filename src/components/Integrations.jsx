@@ -46,13 +46,14 @@ const GamingFacts = ({ facts, rotationDirection }) => {
   )
   
   return (
-    <div className="relative w-full h-full flex items-center justify-center perspective-1000 overflow-hidden" style={{ minHeight: '400px' }}>
+    <div className="relative w-full h-full flex items-center justify-center perspective-1000 overflow-hidden md:min-h-[400px] min-h-[200px]">
       <div 
-        className="relative preserve-3d transition-transform duration-1000 ease-in-out"
+        className="relative preserve-3d transition-transform duration-1000 ease-in-out md:scale-100 scale-[0.5]"
         style={{
           width: `${cubeSize * 2}px`,
           height: `${cubeSize * 2}px`,
-          transform: rotationDirection
+          transform: rotationDirection,
+          transformOrigin: 'center center'
         }}
       >
         {/* Front face */}
@@ -1067,8 +1068,8 @@ function Integrations() {
       name: 'Steam',
       description: 'Connect your Steam account to automatically sync your game library',
       icon: (
-        <svg className="w-10 h-10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M11.979 0C5.678 0 .511 4.86.022 11.037l6.432 2.658c.545-.988 1.578-1.626 2.767-1.626h.873v-.031c0-2.063 1.724-3.73 3.84-3.73 2.116 0 3.843 1.667 3.843 3.73v.031h.873c.622 0 1.206.237 1.637.626l5.834-2.412C22.483 4.851 17.303 0 11.979 0zM6.492 15.068H0v5.694c0 1.835 1.495 3.33 3.33 3.33h3.162v-5.694zm13.854 0h-6.492v5.694h3.162c1.835 0 3.33-1.495 3.33-3.33v-5.694z" fill="white"/>
+        <svg className="w-10 h-10" viewBox="0 0 256 259" fill="white" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid">
+          <path d="M127.779 0C60.42 0 5.24 52.412 0 119.014l68.724 28.674a35.812 35.812 0 0 1 20.426-6.366c.682 0 1.356.019 2.02.056l30.566-44.71v-.626c0-26.903 21.69-48.796 48.353-48.796 26.662 0 48.352 21.893 48.352 48.796 0 26.902-21.69 48.804-48.352 48.804-.37 0-.73-.009-1.098-.018l-43.593 31.377c.028.582.046 1.163.046 1.735 0 20.204-16.283 36.636-36.294 36.636-17.566 0-32.263-12.658-35.584-29.412L4.41 164.654c15.223 54.313 64.673 94.132 123.369 94.132 70.818 0 128.221-57.938 128.221-129.393C256 57.93 198.597 0 127.779 0zM80.352 196.332l-15.749-6.568c2.787 5.867 7.621 10.775 14.033 13.47 13.857 5.83 29.836-.803 35.612-14.799a27.555 27.555 0 0 0 .046-21.035c-2.768-6.79-7.999-12.086-14.706-14.909-6.67-2.795-13.811-2.694-20.085-.304l16.275 6.79c10.222 4.3 15.056 16.145 10.794 26.46-4.253 10.314-15.998 15.195-26.22 10.895zm121.957-100.29c0-17.925-14.457-32.52-32.217-32.52-17.769 0-32.226 14.595-32.226 32.52 0 17.926 14.457 32.512 32.226 32.512 17.76 0 32.217-14.586 32.217-32.512zm-56.37-.055c0-13.488 10.84-24.42 24.2-24.42 13.368 0 24.208 10.932 24.208 24.42 0 13.488-10.84 24.421-24.209 24.421-13.359 0-24.2-10.933-24.2-24.42z" fill="white"/>
         </svg>
       ),
       color: 'from-blue-500 to-blue-600',
@@ -1079,8 +1080,8 @@ function Integrations() {
       name: 'PlayStation Network',
       description: 'Connect your PlayStation account to sync your game library',
       icon: (
-        <svg className="w-10 h-10" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
-          <path d="M8.985 2.596v17.548l3.915 1.261V6.688c0-.69.304-1.151.794-1.151.497 0 .801.47.801 1.151v11.337l3.873 1.268V3.813c0-.616-.285-1.008-.795-1.008-.498 0-.803.389-.803 1.008v7.891l-3.915-1.261V2.596c0-.626-.29-1.008-.794-1.008-.499 0-.801.39-.801 1.008zm-4.952 5.62c-2.322.013-4.033 1.803-4.033 4.033 0 2.305 1.794 4.033 4.033 4.033 2.305 0 4.033-1.794 4.033-4.033 0-2.305-1.828-4.033-4.033-4.033zm-.005 6.585c-1.399 0-2.427-1.068-2.427-2.427 0-1.399 1.028-2.427 2.427-2.427 1.399 0 2.427 1.028 2.427 2.427 0 1.359-1.028 2.427-2.427 2.427zm17.972-5.168v9.063c0 .652.29 1.068.795 1.068.498 0 .794-.416.794-1.068V9.033c0-2.305-1.828-4.033-4.033-4.033-2.305 0-4.033 1.794-4.033 4.033v9.063c0 .652.29 1.068.795 1.068.498 0 .794-.416.794-1.068v-4.033h2.427c1.399 0 2.427-1.028 2.427-2.427 0-1.399-1.028-2.427-2.427-2.427h-2.427V9.033c0-1.399 1.028-2.427 2.427-2.427 1.399 0 2.427 1.028 2.427 2.427z"/>
+        <svg className="w-10 h-10" viewBox="4.3 9.5 41.1 31" fill="white" xmlns="http://www.w3.org/2000/svg">
+          <path d="M5.8 32.1c-1.5 1-1 2.9 2.2 3.8 3.3 1.1 6.9 1.4 10.4.8.2 0 .4-.1.5-.1v-3.4l-3.4 1.1c-1.3.4-2.6.5-3.9.2-1-.3-.8-.9.4-1.4l6.9-2.4V27l-9.6 3.3c-1.2.4-2.4 1-3.5 1.8zm23.2-15v9.7c4.1 2 7.3 0 7.3-5.2 0-5.3-1.9-7.7-7.4-9.6C26 11 23 10.1 20 9.5v28.9l7 2.1V16.2c0-1.1 0-1.9.8-1.6 1.1.3 1.2 1.4 1.2 2.5zm13 12.7c-2.9-1-6-1.4-9-1.1-1.6.1-3.1.5-4.5 1l-.3.1v3.9l6.5-2.4c1.3-.4 2.6-.5 3.9-.2 1 .3.8.9-.4 1.4l-10 3.7V40L42 34.9c1-.4 1.9-.9 2.7-1.7.7-1 .4-2.4-2.7-3.4z" fill="white"/>
         </svg>
       ),
       color: 'from-blue-600 to-indigo-700',
@@ -1302,17 +1303,21 @@ function Integrations() {
       {/* Sync Progress Modal */}
       {isSyncing && (
         <>
-          {/* Mobile oscillating indicators */}
-          <div className="fixed top-0 left-0 right-0 h-1.5 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
-            <div className="relative w-full h-full">
-              <div className="oscillate-indicator w-32 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
-            </div>
-          </div>
-          <div className="fixed bottom-0 left-0 right-0 h-1.5 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
-            <div className="relative w-full h-full">
-              <div className="oscillate-indicator-reverse w-32 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
-            </div>
-          </div>
+          {/* Mobile oscillating indicators - only show when actively syncing (not complete) */}
+          {!(syncProgress.current === syncProgress.total && syncProgress.total > 0) && (
+            <>
+              <div className="fixed top-0 left-0 right-0 h-1.5 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+                <div className="relative w-full h-full">
+                  <div className="oscillate-indicator w-32 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
+                </div>
+              </div>
+              <div className="fixed bottom-0 left-0 right-0 h-1.5 bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 z-[60] md:hidden">
+                <div className="relative w-full h-full">
+                  <div className="oscillate-indicator-reverse w-32 h-full bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500"></div>
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
       <Modal
@@ -1326,6 +1331,8 @@ function Integrations() {
             ? "Sync Complete" 
             : `Syncing Your ${currentSyncService === 'steam' ? 'Steam' : 'PSN'} Library`)}
         preventClose={false}
+        disableScroll={syncProgress.current === syncProgress.total && syncProgress.total > 0}
+        isSyncModal={true}
         footer={
           <div className="flex justify-end gap-3 pt-4">
             <button
@@ -1340,7 +1347,7 @@ function Integrations() {
           </div>
         }
         additionalContent={
-          <div className="relative w-full md:w-full md:max-w-md md:h-auto md:mx-4 md:max-h-[90vh] md:min-h-[400px]" style={{ border: '1px solid #e5e7eb' }}>
+          <div className="relative w-full md:w-full md:max-w-md md:h-auto md:mx-4 md:max-h-[90vh] md:min-h-[400px] mt-4 md:mt-0" style={{ border: '1px solid #e5e7eb' }}>
             <GamingFacts facts={gamingFacts} rotationDirection={rotationDirection} />
           </div>
         }
@@ -1389,11 +1396,11 @@ function Integrations() {
             
             {/* Console-like log */}
             {syncLog.length > 0 && (
-              <div className="w-full bg-gray-900/80 border border-gray-700 rounded-lg p-4">
+              <div className="w-full bg-gray-900/80 border border-gray-700 rounded-lg p-4 mb-4 md:mb-0">
                 <div className="text-xs text-gray-400 mb-2 font-mono">Sync Log:</div>
                 <div 
                   ref={syncLogContainerRef}
-                  className="h-48 overflow-y-auto font-mono text-xs space-y-1 hide-scrollbar"
+                  className="h-32 md:h-48 overflow-y-auto font-mono text-xs space-y-1 hide-scrollbar"
                   style={{ scrollBehavior: 'smooth' }}
                 >
                   {syncLog.map((logItem, index) => {

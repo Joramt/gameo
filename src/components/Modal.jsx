@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-function Modal({ isOpen, onClose, children, title, preventClose = false, additionalContent, opaqueHeader = false, footer = null }) {
+function Modal({ isOpen, onClose, children, title, preventClose = false, additionalContent, opaqueHeader = false, footer = null, disableScroll = false, isSyncModal = false }) {
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden'
@@ -30,7 +30,7 @@ function Modal({ isOpen, onClose, children, title, preventClose = false, additio
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-start justify-center pt-4 pb-4 md:pt-16 bg-black/60 backdrop-blur-md ${additionalContent ? 'md:flex-row md:justify-around md:gap-6' : ''}`}
+      className={`fixed inset-0 z-50 flex ${additionalContent ? 'flex-col md:flex-row' : ''} items-start justify-center pt-4 pb-4 md:pt-16 bg-black/60 backdrop-blur-md ${additionalContent ? 'md:justify-around md:gap-6' : ''}`}
       onClick={(e) => {
         if (e.target === e.currentTarget && !preventClose) {
           onClose()
@@ -69,7 +69,7 @@ function Modal({ isOpen, onClose, children, title, preventClose = false, additio
           <div className="absolute inset-0 animated-gradient opacity-15"></div>
           
           {/* Scrollable container with backdrop blur */}
-          <div className="relative flex-1 flex flex-col bg-black/30 backdrop-blur-lg md:rounded-2xl overflow-y-auto min-h-0">
+          <div className={`relative flex-1 flex flex-col bg-black/30 backdrop-blur-lg md:rounded-2xl min-h-0 ${disableScroll ? 'overflow-hidden' : 'overflow-y-auto'}`}>
             {/* Fixed header with title and close button */}
             {title && (
               <div className={`sticky top-0 flex items-center justify-between p-6 md:p-8 z-20 ${opaqueHeader ? '' : ''}`} style={opaqueHeader ? { backgroundColor: '#170211', border: 'none' } : {}}>
@@ -101,13 +101,13 @@ function Modal({ isOpen, onClose, children, title, preventClose = false, additio
             )}
             
             {/* Scrollable content area */}
-            <div className="relative z-10 px-6 md:px-8 py-6 md:py-8">
+            <div className={`relative z-10 px-6 md:px-8 ${isSyncModal ? 'pt-0 pb-6 md:pt-6 md:pb-8' : 'py-6 md:py-8'}`}>
               {children}
             </div>
             
             {/* Footer area */}
             {footer && (
-              <div className="sticky bottom-0 px-6 md:px-8 pb-6 md:pb-8 pt-4">
+              <div className={`sticky bottom-0 px-6 md:px-8 ${isSyncModal ? 'pt-0 md:pt-4' : 'pt-4'} ${isSyncModal ? '' : 'pb-6 md:pb-8'}`} style={isSyncModal ? { paddingBottom: '15px' } : {}}>
                 {footer}
               </div>
             )}
