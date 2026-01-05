@@ -30,7 +30,7 @@ function SocialFeed() {
   const loadPosts = useCallback(async (currentOffset = 0, append = false) => {
     try {
       setIsLoading(true)
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/posts?limit=${LIMIT}&offset=${currentOffset}`, {
         headers: {
           'Authorization': `Bearer ${token}`,

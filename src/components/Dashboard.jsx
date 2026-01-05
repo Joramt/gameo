@@ -206,7 +206,7 @@ function Dashboard() {
       if (!isAuthenticated) return
 
       try {
-        const token = localStorage.getItem('auth_token')
+        const token = sessionStorage.getItem('auth_token')
         const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/integrations`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -281,7 +281,7 @@ function Dashboard() {
       
       try {
         setIsLoadingGames(true)
-        const token = localStorage.getItem('auth_token')
+        const token = sessionStorage.getItem('auth_token')
         const response = await fetch(`${API_URL}/api/games`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -327,7 +327,7 @@ function Dashboard() {
   const handleSteamSync = async () => {
     setIsSyncing(true)
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/integrations/steam/library`, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -701,7 +701,7 @@ function Dashboard() {
       // Process database update in background
     ;(async () => {
       try {
-        const token = localStorage.getItem('auth_token')
+        const token = sessionStorage.getItem('auth_token')
         const isTemporary = gameInfo.id && gameInfo.id.startsWith('temp-')
         
         // Ensure timePlayed is an integer and handle empty date strings
@@ -809,7 +809,7 @@ function Dashboard() {
         
         // On error, revert by reloading from database
         try {
-          const token = localStorage.getItem('auth_token')
+          const token = sessionStorage.getItem('auth_token')
           const gamesResponse = await fetch(`${API_URL}/api/games`, {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -832,7 +832,7 @@ function Dashboard() {
     if (!userId) return
     
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/games/${game.id}`, {
         method: 'DELETE',
         headers: {
@@ -917,7 +917,7 @@ function Dashboard() {
     if (gameData.steamAppId) {
       (async () => {
         try {
-          const token = localStorage.getItem('auth_token')
+          const token = sessionStorage.getItem('auth_token')
           const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${gameData.steamAppId}`, {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -955,7 +955,7 @@ function Dashboard() {
     // Create game in database in background (non-blocking)
     ;(async () => {
       try {
-        const token = localStorage.getItem('auth_token')
+        const token = sessionStorage.getItem('auth_token')
         const response = await fetch(`${API_URL}/api/games`, {
           method: 'POST',
           headers: {

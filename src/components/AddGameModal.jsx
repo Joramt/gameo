@@ -272,7 +272,7 @@ function AddGameModal({ isOpen, onClose, onAddGame, library = [] }) {
         (async () => {
           try {
             const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
-            const token = localStorage.getItem('auth_token')
+            const token = sessionStorage.getItem('auth_token')
             
             const detailsResponse = await fetch(`${API_URL}/api/integrations/steam/game-details/${game.steamAppId}`, {
               headers: {

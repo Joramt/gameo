@@ -63,6 +63,26 @@ if (supabaseUrl && supabaseKey) {
   console.error(`   SUPABASE_ANON_KEY: ${anonKey ? 'set' : 'NOT SET'}`)
 }
 
+// Function to create a fresh Supabase client for auth operations
+// This prevents session conflicts when multiple users authenticate simultaneously
+export const createAuthClient = () => {
+  const authSupabaseUrl = process.env.SUPABASE_URL
+  const anonKey = process.env.SUPABASE_ANON_KEY
+  
+  if (!authSupabaseUrl || !anonKey) {
+    console.error('❌ Cannot create auth client - missing SUPABASE_URL or SUPABASE_ANON_KEY')
+    return null
+  }
+  
+  // Use anon key for auth operations (needed for Supabase Auth)
+  return createClient(authSupabaseUrl, anonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  })
+}
+
 export { supabase as default }
 export { supabase }
 

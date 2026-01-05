@@ -1,6 +1,6 @@
 import express from 'express'
 import jwt from 'jsonwebtoken'
-import { supabase } from '../services/supabase.js'
+import { supabase, createAuthClient } from '../services/supabase.js'
 
 const router = express.Router()
 
@@ -34,13 +34,15 @@ router.post('/signup', async (req, res) => {
     // Convert ageGroup to age: 5 for <18, 19 for 18+
     const age = ageGroup === 'under18' ? 5 : 19
 
-    if (!supabase) {
+    // Create a fresh auth client for this request to avoid session conflicts
+    const authClient = createAuthClient()
+    if (!authClient) {
       return res.status(500).json({ error: 'Server configuration error' })
     }
 
     // Use Supabase Auth regular signup (works with anon key, no service role needed)
     // This creates user in auth.users and the trigger will create user_profiles automatically
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    const { data: authData, error: authError } = await authClient.auth.signUp({
       email,
       password,
       options: {
@@ -151,12 +153,14 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' })
     }
 
-    if (!supabase) {
+    // Create a fresh auth client for this request to avoid session conflicts
+    const authClient = createAuthClient()
+    if (!authClient) {
       return res.status(500).json({ error: 'Server configuration error' })
     }
 
     // Authenticate with Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+    const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
       email,
       password,
     })

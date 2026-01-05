@@ -25,7 +25,7 @@ function Comments({ postId, gameName }) {
       }
 
       try {
-        const token = localStorage.getItem('auth_token')
+        const token = sessionStorage.getItem('auth_token')
         const response = await fetch(`${API_URL}/api/games`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -57,7 +57,7 @@ function Comments({ postId, gameName }) {
     const loadComments = async () => {
       try {
         setIsLoading(true)
-        const token = localStorage.getItem('auth_token')
+        const token = sessionStorage.getItem('auth_token')
         const response = await fetch(`${API_URL}/api/posts/${postId}/comments`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -114,7 +114,7 @@ function Comments({ postId, gameName }) {
     setIsSubmitting(true)
     setError('')
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/posts/${postId}/comments`, {
         method: 'POST',
         headers: {
@@ -161,7 +161,7 @@ function Comments({ postId, gameName }) {
     if (!editContent.trim()) return
 
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/posts/${postId}/comments/${commentId}`, {
         method: 'PUT',
         headers: {
@@ -186,7 +186,7 @@ function Comments({ postId, gameName }) {
 
   const handleCommentLike = async (commentId) => {
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/comments/${commentId}/like`, {
         method: 'POST',
         headers: {

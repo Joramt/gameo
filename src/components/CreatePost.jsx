@@ -42,7 +42,7 @@ function CreatePost({ isOpen, onClose, onPostCreated }) {
       setIsSearching(true)
       setError('')
       try {
-        const token = localStorage.getItem('auth_token')
+        const token = sessionStorage.getItem('auth_token')
         const response = await fetch(`${API_URL}/api/posts/games/search?q=${encodeURIComponent(gameSearch)}`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -104,7 +104,7 @@ function CreatePost({ isOpen, onClose, onPostCreated }) {
 
     setIsSubmitting(true)
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/posts`, {
         method: 'POST',
         headers: {
@@ -309,4 +309,5 @@ function CreatePost({ isOpen, onClose, onPostCreated }) {
 }
 
 export default CreatePost
+
 

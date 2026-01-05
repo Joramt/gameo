@@ -21,7 +21,7 @@ function PostCard({ post, onPostUpdated }) {
   useEffect(() => {
     const loadLikes = async () => {
       try {
-        const token = localStorage.getItem('auth_token')
+        const token = sessionStorage.getItem('auth_token')
         const response = await fetch(`${API_URL}/api/posts/${post.id}/likes`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -67,7 +67,7 @@ function PostCard({ post, onPostUpdated }) {
     setIsSubmitting(true)
     setError('')
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/posts/${post.id}`, {
         method: 'PUT',
         headers: {
@@ -100,7 +100,7 @@ function PostCard({ post, onPostUpdated }) {
 
   const handleLike = async () => {
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/posts/${post.id}/like`, {
         method: 'POST',
         headers: {

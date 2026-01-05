@@ -21,7 +21,7 @@ export const AuthProvider = ({ children }) => {
 
   // Check for existing token on mount
   useEffect(() => {
-    const token = localStorage.getItem('auth_token')
+    const token = sessionStorage.getItem('auth_token')
     if (token) {
       // Verify token is still valid by fetching user data
       fetchUserData(token)
@@ -84,14 +84,14 @@ export const AuthProvider = ({ children }) => {
         await checkBudget(token)
       } else {
         // Token is invalid, clear it
-        localStorage.removeItem('auth_token')
+        sessionStorage.removeItem('auth_token')
         setUser(null)
         setIsAuthenticated(false)
         setHasBudget(null)
       }
     } catch (err) {
       console.error('Error fetching user data:', err)
-      localStorage.removeItem('auth_token')
+      sessionStorage.removeItem('auth_token')
       setUser(null)
       setIsAuthenticated(false)
       setHasBudget(null)
@@ -120,8 +120,8 @@ export const AuthProvider = ({ children }) => {
         throw new Error(data.error || 'Login failed')
       }
 
-      // Store token
-      localStorage.setItem('auth_token', data.token)
+      // Store token in sessionStorage (per-tab, allows multiple accounts in different tabs)
+      sessionStorage.setItem('auth_token', data.token)
       
       // Set user data
       setUser(data.user)
@@ -159,8 +159,8 @@ export const AuthProvider = ({ children }) => {
         throw new Error(data.error || 'Signup failed')
       }
 
-      // Store token
-      localStorage.setItem('auth_token', data.token)
+      // Store token in sessionStorage (per-tab, allows multiple accounts in different tabs)
+      sessionStorage.setItem('auth_token', data.token)
       
       // Set user data
       setUser(data.user)
@@ -180,7 +180,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       if (token) {
         // Optional: Call logout endpoint to invalidate token on server
         await fetch(`${API_URL}/api/auth/logout`, {
@@ -197,7 +197,7 @@ export const AuthProvider = ({ children }) => {
       console.error('Error during logout:', err)
     } finally {
       // Clear local state regardless of API call success
-      localStorage.removeItem('auth_token')
+      sessionStorage.removeItem('auth_token')
       setUser(null)
       setIsAuthenticated(false)
       setError(null)
@@ -206,7 +206,7 @@ export const AuthProvider = ({ children }) => {
   }
 
   const refreshBudget = async () => {
-    const token = localStorage.getItem('auth_token')
+    const token = sessionStorage.getItem('auth_token')
     if (token) {
       await checkBudget(token)
     }

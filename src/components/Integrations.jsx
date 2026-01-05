@@ -195,7 +195,7 @@ function Integrations() {
   const fetchConnections = async () => {
     try {
       setIsLoadingConnections(true)
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/integrations`, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -240,7 +240,7 @@ function Integrations() {
   const handleSteamConnect = async () => {
     setIsConnecting(true)
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/integrations/steam/auth`, {
         method: 'POST',
         headers: {
@@ -268,7 +268,7 @@ function Integrations() {
 
   const handleDisconnect = async (service) => {
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/integrations/${service}`, {
         method: 'DELETE',
         headers: {
@@ -298,7 +298,7 @@ function Integrations() {
 
     setIsConnecting(true)
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/integrations/psn/auth`, {
         method: 'POST',
         headers: {
@@ -409,7 +409,7 @@ function Integrations() {
     const abortSignal = syncAbortControllerRef.current.signal
     
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       console.log('[PSN SYNC] Fetching PSN library from backend using getUserPlayedGames...')
       const response = await fetch(`${API_URL}/api/integrations/psn/library`, {
         headers: {
@@ -695,7 +695,7 @@ function Integrations() {
     const abortSignal = syncAbortControllerRef.current.signal
     
     try {
-      const token = localStorage.getItem('auth_token')
+      const token = sessionStorage.getItem('auth_token')
       const response = await fetch(`${API_URL}/api/integrations/steam/library`, {
         headers: {
           'Authorization': `Bearer ${token}`,
